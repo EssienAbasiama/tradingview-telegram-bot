@@ -30,7 +30,7 @@ app.post("/tradingview-webhook", async (req, res) => {
     await axios.post(
       `https://api.telegram.org/bot${process.env.TELEGRAM_TOKEN}/sendMessage`,
       {
-        chat_id: process.env.CHAT_ID,
+        chat_id: process.env.CHANNEL_CHAT_ID,
         text: message,
         parse_mode: "Markdown",
       }
