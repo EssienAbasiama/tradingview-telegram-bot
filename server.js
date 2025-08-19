@@ -10,6 +10,8 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(bodyParser.json());
 
+
+
 // === 1. Handle TradingView Webhook ===
 app.post("/tradingview-webhook", async (req, res) => {
   const { pair, event, timeframe, timestamp, volume } = req.body;
@@ -82,7 +84,7 @@ app.post("/telegram-webhook", async (req, res) => {
 
 // === 3. Handle MetaTrader EA Alerts ===
 app.post("/meta", async (req, res) => {
-  const { symbol, signal, timeframe, price } = req.body;
+const { symbol, signal, timeframe, price, message, timestamp } = req.body;
 
   const formattedTime = new Date().toLocaleString("en-US", {
     timeZone: "UTC",
