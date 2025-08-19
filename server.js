@@ -10,8 +10,6 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(bodyParser.json());
 
-
-
 // === 1. Handle TradingView Webhook ===
 app.post("/tradingview-webhook", async (req, res) => {
   const { pair, event, timeframe, timestamp, volume } = req.body;
@@ -84,24 +82,31 @@ app.post("/telegram-webhook", async (req, res) => {
 
 // === 3. Handle MetaTrader EA Alerts ===
 app.post("/meta", async (req, res) => {
-const { symbol, signal, timeframe, price, message, timestamp } = req.body;
+  const { symbol, signal, timeframe, price, timestamp } = req.body;
 
-  const formattedTime = new Date().toLocaleString("en-US", {
-    timeZone: "UTC",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  // Always fix to 2 decimals
+  const formattedPrice = parseFloat(price).toFixed(2);
+
+  // Format timestamp
+  const formattedTime = new Date(timestamp || Date.now()).toLocaleString(
+    "en-US",
+    {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }
+  );
 
   const message =
     `📊 *MT5 Alert Triggered!*\n\n` +
     `*Symbol:* ${symbol}\n` +
     `*Signal:* ${signal}\n` +
     `*Timeframe:* ${timeframe}\n` +
-    `*Price:* ${price}\n` +
+    `*Price:* ${formattedPrice}\n` +
     `*Time:* ${formattedTime} UTC`;
 
   try {
