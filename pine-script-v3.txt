@@ -1,0 +1,178 @@
+//@version=6
+indicator("📈 Smart Alert System — EMA/MA/Volume/SMC Alerts", overlay=true)
+
+// === SETTINGS ===
+volumeSpikeMultiplier = input.float(2.0, "Volume Spike Threshold (x average)")
+testAlert = input.bool(true, "🔁 Send Dummy Test Alert on Script Load")
+
+symbolName = syminfo.ticker
+tf = timeframe.period
+now = time
+
+// === EMA and MA Calculations ===
+ema_13 = ta.ema(close, 13)
+ema_25 = ta.ema(close, 25)
+ema_30 = ta.ema(close, 30)
+ema_200 = ta.ema(close, 200)
+ma_100 = ta.sma(close, 100)
+ma_300 = ta.sma(close, 300)
+
+plot(ema_13, "EMA 13", color=color.blue)
+plot(ema_25, "EMA 25", color=color.blue)
+plot(ema_30, "EMA 30", color=color.blue)
+plot(ema_200, "EMA 200", color=color.purple, linewidth=2)
+plot(ma_100, "MA 100", color=color.orange)
+plot(ma_300, "MA 300", color=color.orange)
+
+// === FUNCTION: Send Alert as JSON ===
+sendAlert(eventText) =>
+    alert("{" +
+      "\"pair\":\"" + symbolName + "\", " +
+      "\"event\":\"" + eventText + "\", " +
+      "\"timeframe\":\"" + tf + "\", " +
+      "\"timestamp\":\"" + str.tostring(now) + "\", " +
+      "\"volume\":\"" + str.tostring(volume) + "\"}" ,
+      alert.freq_once_per_bar)
+
+// === VOLUME SPIKE ===
+avgVol = ta.sma(volume, 20)
+volSpike = volume > avgVol * volumeSpikeMultiplier
+plotshape(volSpike, location=location.abovebar, style=shape.triangleup, color=color.red, size=size.tiny)
+
+var bool volumeSent = false
+if volSpike and not volumeSent
+    sendAlert("🔺 Volume Spike")
+    volumeSent := true
+if not volSpike
+    volumeSent := false
+
+// === EMA TOUCH ALERTS ===
+touch(val, crossed) =>
+    math.abs(close - val) / val < 0.001 or crossed
+
+var bool touch13Sent = false
+var bool touch25Sent = false
+var bool touch30Sent = false
+var bool touch200Sent = false
+
+cross13 = ta.cross(close, ema_13)
+cross25 = ta.cross(close, ema_25)
+cross30 = ta.cross(close, ema_30)
+cross200 = ta.cross(close, ema_200)
+
+if touch(ema_13, cross13) and not touch13Sent
+    sendAlert("EMA 13 Touch")
+    touch13Sent := true
+if not touch(ema_13, cross13)
+    touch13Sent := false
+
+if touch(ema_25, cross25) and not touch25Sent
+    sendAlert("EMA 25 Touch")
+    touch25Sent := true
+if not touch(ema_25, cross25)
+    touch25Sent := false
+
+if touch(ema_30, cross30) and not touch30Sent
+    sendAlert("EMA 30 Touch")
+    touch30Sent := true
+if not touch(ema_30, cross30)
+    touch30Sent := false
+
+if touch(ema_200, cross200) and not touch200Sent
+    sendAlert("EMA 200 Touch")
+    touch200Sent := true
+if not touch(ema_200, cross200)
+    touch200Sent := false
+
+// === EMA RETESTS ===
+emaBullishRetest(ema) => close[1] < ema[1] and close > ema
+emaBearishRetest(ema) => close[1] > ema[1] and close < ema
+
+var bool ema13BullSent = false
+var bool ema13BearSent = false
+
+if emaBullishRetest(ema_13) and not ema13BullSent
+    sendAlert("EMA 13 Bullish Retest")
+    ema13BullSent := true
+if not emaBullishRetest(ema_13)
+    ema13BullSent := false
+
+if emaBearishRetest(ema_13) and not ema13BearSent
+    sendAlert("EMA 13 Bearish Retest")
+    ema13BearSent := true
+if not emaBearishRetest(ema_13)
+    ema13BearSent := false
+
+// === Repeat for EMA 25
+var bool ema25BullSent = false
+var bool ema25BearSent = false
+
+if emaBullishRetest(ema_25) and not ema25BullSent
+    sendAlert("EMA 25 Bullish Retest")
+    ema25BullSent := true
+if not emaBullishRetest(ema_25)
+    ema25BullSent := false
+
+if emaBearishRetest(ema_25) and not ema25BearSent
+    sendAlert("EMA 25 Bearish Retest")
+    ema25BearSent := true
+if not emaBearishRetest(ema_25)
+    ema25BearSent := false
+
+// === Repeat for EMA 30
+var bool ema30BullSent = false
+var bool ema30BearSent = false
+
+if emaBullishRetest(ema_30) and not ema30BullSent
+    sendAlert("EMA 30 Bullish Retest")
+    ema30BullSent := true
+if not emaBullishRetest(ema_30)
+    ema30BullSent := false
+
+if emaBearishRetest(ema_30) and not ema30BearSent
+    sendAlert("EMA 30 Bearish Retest")
+    ema30BearSent := true
+if not emaBearishRetest(ema_30)
+    ema30BearSent := false
+
+// === MA BREAK & RETEST ===
+breakBelow(ma) => close[1] > ma[1] and close < ma
+retestFromBelow(ma) => close > ma and close[1] < ma[1]
+
+if breakBelow(ma_100)
+    sendAlert("MA 100 Break")
+if retestFromBelow(ma_100)
+    sendAlert("MA 100 Retest")
+if breakBelow(ma_300)
+    sendAlert("MA 300 Break")
+if retestFromBelow(ma_300)
+    sendAlert("MA 300 Retest")
+
+// === SMC: BREAK OF STRUCTURE / CHOCH ===
+swingHigh = ta.pivothigh(high, 3, 3)
+swingLow = ta.pivotlow(low, 3, 3)
+
+var float prevHigh = na
+var float prevLow = na
+
+if not na(swingHigh)
+    prevHigh := swingHigh
+if not na(swingLow)
+    prevLow := swingLow
+
+bos = not na(prevHigh) and high > prevHigh
+choch = not na(prevLow) and low < prevLow
+
+plotshape(bos, location=location.abovebar, style=shape.labelup, color=color.green, text="BOS")
+plotshape(choch, location=location.belowbar, style=shape.labeldown, color=color.red, text="CHOCH")
+
+if bos
+    sendAlert("📈 BOS Detected")
+if choch
+    sendAlert("📉 CHOCH Detected")
+
+// === 🔁 Dummy Alert (fires once only)
+var bool sentTest = false
+if testAlert and not sentTest
+    sendAlert("✅ Test Alert Fired")
+    sentTest := true

@@ -1,0 +1,104 @@
+//@version=6
+indicator("📈 Smart Alert System — EMA/MA/Volume/SMC Alerts", overlay=true)
+
+// === SETTINGS ===
+volumeSpikeMultiplier = input.float(2.0, "Volume Spike Threshold (x average)")
+testAlert = input.bool(true, "🔁 Send Dummy Test Alert on Script Load")
+
+symbolName = syminfo.ticker
+tf = timeframe.period
+now = time
+
+// === EMA and MA Calculations ===
+ema_13 = ta.ema(close, 13)
+ema_25 = ta.ema(close, 25)
+ema_30 = ta.ema(close, 30)
+ema_200 = ta.ema(close, 200)
+ma_100 = ta.sma(close, 100)
+ma_300 = ta.sma(close, 300)
+
+plot(ema_13, "EMA 13", color=color.blue)
+plot(ema_25, "EMA 25", color=color.blue)
+plot(ema_30, "EMA 30", color=color.blue)
+plot(ema_200, "EMA 200", color=color.purple, linewidth=2)
+plot(ma_100, "MA 100", color=color.orange)
+plot(ma_300, "MA 300", color=color.orange)
+
+// === FUNCTION: Send Alert as JSON ===
+sendAlert(eventText) =>
+    alert("{" +
+      "\"pair\":\"" + symbolName + "\", " +
+      "\"event\":\"" + eventText + "\", " +
+      "\"timeframe\":\"" + tf + "\", " +
+      "\"timestamp\":\"" + str.tostring(now) + "\", " +
+      "\"volume\":\"" + str.tostring(volume) + "\"}" ,
+      alert.freq_once_per_bar)
+
+// === VOLUME SPIKE ===
+avgVol = ta.sma(volume, 20)
+volSpike = volume > avgVol * volumeSpikeMultiplier
+plotshape(volSpike, location=location.abovebar, style=shape.triangleup, color=color.red, size=size.tiny)
+if volSpike
+    sendAlert("🔺 Volume Spike")
+
+// === EMA TOUCH ALERTS ===
+cross13 = ta.cross(close, ema_13)
+cross25 = ta.cross(close, ema_25)
+cross30 = ta.cross(close, ema_30)
+cross200 = ta.cross(close, ema_200)
+
+touch(val, crossed) =>
+    math.abs(close - val) / val < 0.001 or crossed
+
+if touch(ema_13, cross13)
+    sendAlert("EMA 13 Touch")
+if touch(ema_25, cross25)
+    sendAlert("EMA 25 Touch")
+if touch(ema_30, cross30)
+    sendAlert("EMA 30 Touch")
+if touch(ema_200, cross200)
+    sendAlert("EMA 200 Touch")
+
+// === MA BREAK & RETEST ===
+breakBelow(ma) => close[1] > ma[1] and close < ma
+retestFromBelow(ma) => close > ma and close[1] < ma[1]
+
+if breakBelow(ma_100)
+    sendAlert("MA 100 Break")
+if retestFromBelow(ma_100)
+    sendAlert("MA 100 Retest")
+if breakBelow(ma_300)
+    sendAlert("MA 300 Break")
+if retestFromBelow(ma_300)
+    sendAlert("MA 300 Retest")
+
+// === SMC: BREAK OF STRUCTURE / CHOCH ===
+swingHigh = ta.pivothigh(high, 3, 3)
+swingLow = ta.pivotlow(low, 3, 3)
+
+var float prevHigh = na
+var float prevLow = na
+
+if not na(swingHigh)
+    prevHigh := swingHigh
+if not na(swingLow)
+    prevLow := swingLow
+
+// BOS: Price breaks previous swing high (bullish structure break)
+bos = not na(prevHigh) and high > prevHigh
+// CHoCH: Price breaks previous swing low after a higher high (trend change)
+choch = not na(prevLow) and low < prevLow
+
+plotshape(bos, location=location.abovebar, style=shape.labelup, color=color.green, text="BOS")
+plotshape(choch, location=location.belowbar, style=shape.labeldown, color=color.red, text="CHOCH")
+
+if bos
+    sendAlert("📈 BOS Detected")
+if choch
+    sendAlert("📉 CHOCH Detected")
+
+// === 🔁 Dummy Alert (fires once only)
+var bool sentTest = false
+if testAlert and not sentTest
+    sendAlert("✅ Test Alert Fired")
+    sentTest := true
