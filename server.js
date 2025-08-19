@@ -82,7 +82,7 @@ app.post("/telegram-webhook", async (req, res) => {
 
 // === 3. Handle MetaTrader EA Alerts ===
 app.post("/meta", async (req, res) => {
-    console.log("Received MT5 alert:", req.body);
+    console.log("Received MT5 alert:", req);
   const { symbol, signal, timeframe, price, timestamp } = req.body;
 
   // Always fix to 2 decimals
