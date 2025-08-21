@@ -8,7 +8,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(bodyParser.json());
+// app.use(bodyParser.json());
+
+app.use("/tradingview-webhook", bodyParser.json());
+app.use("/telegram-webhook", bodyParser.json());
+
+// For MT5 EA: accept raw text (and parse manually later)
+app.use("/meta", bodyParser.text({ type: "*/*" }));
+
 
 // === 1. Handle TradingView Webhook ===
 app.post("/tradingview-webhook", async (req, res) => {
@@ -82,35 +89,39 @@ app.post("/telegram-webhook", async (req, res) => {
 
 // === 3. Handle MetaTrader EA Alerts ===
 app.post("/meta", async (req, res) => {
-    console.log("Received MT5 alert:", req);
-  const { symbol, signal, timeframe, price, timestamp } = req.body;
-
-  // Always fix to 2 decimals
-  const formattedPrice = parseFloat(price).toFixed(2);
-
-  // Format timestamp
-  const formattedTime = new Date(timestamp || Date.now()).toLocaleString(
-    "en-US",
-    {
-      timeZone: "UTC",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }
-  );
-
-  const message =
-    `📊 *MT5 Alert Triggered!*\n\n` +
-    `*Symbol:* ${symbol}\n` +
-    `*Signal:* ${signal}\n` +
-    `*Timeframe:* ${timeframe}\n` +
-    `*Price:* ${formattedPrice}\n` +
-    `*Time:* ${formattedTime} UTC`;
-
   try {
+    console.log("🟢 Raw MT5 body:", req.body);
+
+    // If EA sends JSON-like text, parse it safely
+    const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+
+    const { symbol, signal, timeframe, price, timestamp } = payload;
+
+    const formattedPrice = parseFloat(price).toFixed(2);
+
+    const formattedTime = new Date(timestamp || Date.now()).toLocaleString(
+      "en-US",
+      {
+        timeZone: "UTC",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      }
+    );
+
+    const message =
+      `📊 *MT5 Alert Triggered!*\n\n` +
+      `*Symbol:* ${symbol}\n` +
+      `*Signal:* ${signal}\n` +
+      `*Timeframe:* ${timeframe}\n` +
+      `*Price:* ${formattedPrice}\n` +
+      `*Time:* ${formattedTime} UTC`;
+
+    console.log("Formatted MT5 message:", message);
+
     await axios.post(
       `https://api.telegram.org/bot${process.env.TELEGRAM_TOKEN}/sendMessage`,
       {
@@ -122,9 +133,9 @@ app.post("/meta", async (req, res) => {
 
     console.log("✅ MT5 alert sent to Telegram");
     res.status(200).send("OK");
-  } catch (error) {
-    console.error("❌ Failed to send MT5 alert:", error.message);
-    res.status(500).send("Failed to send MT5 alert");
+  } catch (err) {
+    console.error("❌ Failed to process MT5 alert:", err.message);
+    res.status(400).send("Invalid MT5 payload");
   }
 });
 
@@ -137,3 +148,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🟢 Server running at http://localhost:${PORT}`);
 });
+  `1`
