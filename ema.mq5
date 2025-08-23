@@ -1,145 +1,244 @@
 //+------------------------------------------------------------------+
-//|                        EMA_Meta_Alerts.mq5                      |
+//|                        EMA_Meta_Alerts.mq5                       |
 //|                Author: Essien Abasiama © 2025 Abasiama           |
 //+------------------------------------------------------------------+
 #property copyright "Essien Abasiama © 2025 Abasiama"
 #property link      "https://www.mql5.com"
-#property version   "1.11"
+#property version   "1.25"
 #property strict
 
-input int Fast_MA = 9;    // Fast EMA
-input int Slow_MA = 21;   // Slow EMA
+//--- Inputs
+input int   Fast_MA         = 10;     // Fast EMA length
+input int   Slow_MA         = 10;     // Slow SMA length
+input int   LookBackBars    = 500;    // How many bars back to scan for historical crosses (per TF)
+input bool  Draw_X_Marks    = true;   // Draw X marks on chart
+input color CrossColor      = clrRed; // Color for the X marks
+input int   CrossFontSize   = 14;     // Font size for the X marks
 
-// Timeframes to monitor
+//--- Timeframes to monitor
 ENUM_TIMEFRAMES TFs[3] = { PERIOD_M5, PERIOD_M15, PERIOD_H1 };
 
-// Memory to avoid duplicates
-bool sentLong[3];
-bool sentShort[3];
+//--- Memory to avoid duplicates
+datetime lastSentCrossTime[3];
 
-// Backend endpoint
-string BASE_URL = "https://c280e4e87b61.ngrok-free.app/meta";
+//--- Backend endpoint
+string BASE_URL = "https://2c9dda212754.ngrok-free.app/meta";
+
+//--- Global handles for visible indicators
+int fastHandleMain = INVALID_HANDLE;
+int slowHandleMain = INVALID_HANDLE;
+
+//--- Indicator names for cleanup
+string fastShortName = "Fast EMA";
+string slowShortName = "Slow SMA";
+
+//--- Forward declarations
+string TimeframeToString(ENUM_TIMEFRAMES tf);
+void   DrawHistoricalCrosses(int index, ENUM_TIMEFRAMES tf, int lookback);
+void   CheckRealtimeCross(int index, ENUM_TIMEFRAMES tf);
+void   CreateXMark(string tfName, datetime crossTime, double crossPrice);
+void   DeleteOurHistoricalMarks();
+string JsonEscape(string s);
+void   SendToBackend(string symbol,string signal,string timeframe,double price,string message);
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("✅ EMA Meta Alert EA Initialized for ", _Symbol);
-   ArrayInitialize(sentLong, false);
-   ArrayInitialize(sentShort, false);
+   Print("✅ EMA/SMA Cross EA Initialized for ", _Symbol);
+
+   DeleteOurHistoricalMarks();
+
+   // Attach visible EMA + SMA
+   fastHandleMain = iMA(_Symbol, PERIOD_CURRENT, Fast_MA, 0, MODE_EMA, PRICE_CLOSE);
+   slowHandleMain = iMA(_Symbol, PERIOD_CURRENT, Slow_MA, 0, MODE_SMA, PRICE_CLOSE);
+
+   if(fastHandleMain != INVALID_HANDLE)
+      ChartIndicatorAdd(0, 0, fastHandleMain);
+   else
+      Print("❌ Failed to create fast EMA handle.");
+
+   if(slowHandleMain != INVALID_HANDLE)
+      ChartIndicatorAdd(0, 0, slowHandleMain);
+   else
+      Print("❌ Failed to create slow SMA handle.");
+
+   // Historical scan
+   for(int i=0; i<ArraySize(TFs); i++)
+      DrawHistoricalCrosses(i, TFs[i], LookBackBars);
 
    // Test connection
-   SendToBackend(_Symbol, "TEST", "INIT", SymbolInfoDouble(_Symbol, SYMBOL_BID),
-                 "Dummy init message from MT5 EA");
+  // SendToBackend(_Symbol, "TEST", "INIT", SymbolInfoDouble(_Symbol, SYMBOL_BID),
+  //               "Init message from MT5 EA");
+
    return(INIT_SUCCEEDED);
 }
 
 //+------------------------------------------------------------------+
-//| Expert tick                                                      |
+//| Expert deinitialization                                          |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   if(fastHandleMain != INVALID_HANDLE)
+   {
+      ChartIndicatorDelete(0, 0, fastShortName);
+      IndicatorRelease(fastHandleMain);
+      fastHandleMain = INVALID_HANDLE;
+   }
+
+   if(slowHandleMain != INVALID_HANDLE)
+   {
+      ChartIndicatorDelete(0, 0, slowShortName);
+      IndicatorRelease(slowHandleMain);
+      slowHandleMain = INVALID_HANDLE;
+   }
+
+   // If you want to auto-remove X marks:
+   // DeleteOurHistoricalMarks();
+}
+
+//+------------------------------------------------------------------+
+//| OnTick                                                           |
 //+------------------------------------------------------------------+
 void OnTick()
 {
    for(int i=0; i<ArraySize(TFs); i++)
-   {
-      CheckCross(i, TFs[i]);
-   }
+      CheckRealtimeCross(i, TFs[i]);
 }
 
 //+------------------------------------------------------------------+
-//| Check EMA crossover for given timeframe                          |
+//| Historical crosses                                               |
 //+------------------------------------------------------------------+
-void CheckCross(int index, ENUM_TIMEFRAMES tf)
+void DrawHistoricalCrosses(int index, ENUM_TIMEFRAMES tf, int lookback)
 {
    string tfName = TimeframeToString(tf);
+   int totalBars = Bars(_Symbol, tf);
+   if(totalBars < 3) return;
 
-   // Create handles for EMA indicators
+   int neededBars = MathMin(MathMax(lookback + 2, 10), totalBars);
+
    int fastHandle = iMA(_Symbol, tf, Fast_MA, 0, MODE_EMA, PRICE_CLOSE);
-   int slowHandle = iMA(_Symbol, tf, Slow_MA, 0, MODE_EMA, PRICE_CLOSE);
+   int slowHandle = iMA(_Symbol, tf, Slow_MA, 0, MODE_SMA, PRICE_CLOSE);
 
-   if(fastHandle == INVALID_HANDLE || slowHandle == INVALID_HANDLE)
+   double fastArr[], slowArr[];
+   ArraySetAsSeries(fastArr, true);
+   ArraySetAsSeries(slowArr, true);
+
+   if(CopyBuffer(fastHandle, 0, 0, neededBars, fastArr) < 2 ||
+      CopyBuffer(slowHandle, 0, 0, neededBars, slowArr) < 2)
    {
-      Print("❌ Failed to create EMA handles on ", tfName);
+      IndicatorRelease(fastHandle);
+      IndicatorRelease(slowHandle);
       return;
    }
 
-   double fast[3], slow[3];
-   ArraySetAsSeries(fast, true);
-   ArraySetAsSeries(slow, true);
-
-   if(CopyBuffer(fastHandle, 0, 0, 3, fast) < 3) return;
-   if(CopyBuffer(slowHandle, 0, 0, 3, slow) < 3) return;
-
-   // Current vs previous values
-   double fastNow = fast[0];
-   double fastPrev = fast[1];
-   double slowNow = slow[0];
-   double slowPrev = slow[1];
-
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-
-   // --- LONG cross ---
-   if(fastNow > slowNow && fastPrev <= slowPrev && !sentLong[index])
+   datetime mostRecentCross = 0;
+   for(int j=1; j<neededBars; j++)
    {
-      string msg = "📈 LONG EMA Cross on " + _Symbol +
-                   "\n⏱ Timeframe: " + tfName +
-                   "\nPrice: " + DoubleToString(bid,_Digits);
+      double d_now = fastArr[j-1] - slowArr[j-1];
+      double d_prev= fastArr[j]   - slowArr[j];
 
-      SendToBackend(_Symbol, "LONG", tfName, bid, msg);
-      DrawSignalArrow("LONG", tfName, bid);
-
-      sentLong[index] = true;
-      sentShort[index] = false;
-
-      Print("✅ LONG cross detected on ", tfName);
+      if(d_now * d_prev < 0.0) // cross
+      {
+         datetime crossTime = iTime(_Symbol, tf, j-1);
+         double crossPrice  = (fastArr[j-1] + slowArr[j-1]) / 2.0; // ✅ Midpoint
+         CreateXMark(tfName, crossTime, crossPrice);
+         if(crossTime > mostRecentCross) mostRecentCross = crossTime;
+      }
    }
 
-   // --- SHORT cross ---
-   if(fastNow < slowNow && fastPrev >= slowPrev && !sentShort[index])
+   if(mostRecentCross > 0)
+      lastSentCrossTime[index] = mostRecentCross;
+
+   IndicatorRelease(fastHandle);
+   IndicatorRelease(slowHandle);
+
+   Print("✅ Historical crosses drawn for ", tfName);
+}
+
+//+------------------------------------------------------------------+
+//| Realtime cross check                                             |
+//+------------------------------------------------------------------+
+void CheckRealtimeCross(int index, ENUM_TIMEFRAMES tf)
+{
+   string tfName = TimeframeToString(tf);
+
+   int fastHandle = iMA(_Symbol, tf, Fast_MA, 0, MODE_EMA, PRICE_CLOSE);
+   int slowHandle = iMA(_Symbol, tf, Slow_MA, 0, MODE_SMA, PRICE_CLOSE);
+
+   double fastArr[2], slowArr[2];
+   ArraySetAsSeries(fastArr, true);
+   ArraySetAsSeries(slowArr, true);
+
+   if(CopyBuffer(fastHandle, 0, 0, 2, fastArr) < 2 ||
+      CopyBuffer(slowHandle, 0, 0, 2, slowArr) < 2)
    {
-      string msg = "📉 SHORT EMA Cross on " + _Symbol +
-                   "\n⏱ Timeframe: " + tfName +
-                   "\nPrice: " + DoubleToString(bid,_Digits);
-
-      SendToBackend(_Symbol, "SHORT", tfName, bid, msg);
-      DrawSignalArrow("SHORT", tfName, bid);
-
-      sentShort[index] = true;
-      sentLong[index] = false;
-
-      Print("✅ SHORT cross detected on ", tfName);
+      IndicatorRelease(fastHandle);
+      IndicatorRelease(slowHandle);
+      return;
    }
 
-   // Release handles to avoid memory leak
+   double d_now  = fastArr[0] - slowArr[0];
+   double d_prev = fastArr[1] - slowArr[1];
+
+   if(d_now * d_prev < 0.0) // cross
+   {
+      datetime crossTime = iTime(_Symbol, tf, 0);
+      double crossPrice  = (fastArr[0] + slowArr[0]) / 2.0; // ✅ Midpoint
+
+      if(lastSentCrossTime[index] != crossTime)
+      {
+         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         string msg = "EMA/SMA Cross on " + _Symbol +
+                      "\nTF: " + tfName +
+                      "\nPrice: " + DoubleToString(bid, _Digits);
+
+         SendToBackend(_Symbol, "CROSS", tfName, bid, msg);
+         CreateXMark(tfName, crossTime, crossPrice);
+         lastSentCrossTime[index] = crossTime;
+
+         Print("✅ Realtime EMA/SMA cross on ", tfName);
+      }
+   }
+
    IndicatorRelease(fastHandle);
    IndicatorRelease(slowHandle);
 }
 
 //+------------------------------------------------------------------+
-//| Draw chart arrow                                                 |
+//| Draw X Mark                                                      |
 //+------------------------------------------------------------------+
-void DrawSignalArrow(string direction, string tfName, double price)
+void CreateXMark(string tfName, datetime crossTime, double crossPrice)
 {
-   string arrowName = direction + "_" + tfName + "_" + (string)TimeCurrent();
+   string name = StringFormat("X_%s_%d", tfName, (int)crossTime);
 
-   if(direction == "LONG")
+   if(ObjectFind(0, name) < 0)
    {
-      ObjectCreate(0, arrowName, OBJ_ARROW, 0, TimeCurrent(), price);
-      ObjectSetInteger(0, arrowName, OBJPROP_ARROWCODE, 233); // Up arrow
-      ObjectSetInteger(0, arrowName, OBJPROP_COLOR, clrGreen);
-      ObjectSetInteger(0, arrowName, OBJPROP_WIDTH, 2);
-   }
-   else if(direction == "SHORT")
-   {
-      ObjectCreate(0, arrowName, OBJ_ARROW, 0, TimeCurrent(), price);
-      ObjectSetInteger(0, arrowName, OBJPROP_ARROWCODE, 234); // Down arrow
-      ObjectSetInteger(0, arrowName, OBJPROP_COLOR, clrRed);
-      ObjectSetInteger(0, arrowName, OBJPROP_WIDTH, 2);
+      ObjectCreate(0, name, OBJ_TEXT, 0, crossTime, crossPrice);
+      ObjectSetString(0, name, OBJPROP_TEXT, "X");
+      ObjectSetInteger(0, name, OBJPROP_COLOR, CrossColor);
+      ObjectSetInteger(0, name, OBJPROP_FONTSIZE, CrossFontSize);
+      ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);
    }
 }
 
 //+------------------------------------------------------------------+
-//| Safe JSON escape                                                 |
+//| Delete old marks                                                 |
+//+------------------------------------------------------------------+
+void DeleteOurHistoricalMarks()
+{
+   int total = ObjectsTotal(0);
+   for(int i=total-1; i>=0; --i)
+   {
+      string nm = ObjectName(0, i);
+      if(StringFind(nm, "X_") == 0)
+         ObjectDelete(0, nm);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| JSON Escape                                                      |
 //+------------------------------------------------------------------+
 string JsonEscape(string s)
 {
@@ -161,7 +260,7 @@ string JsonEscape(string s)
 }
 
 //+------------------------------------------------------------------+
-//| Send alert to backend                                            |
+//| Send JSON to backend                                             |
 //+------------------------------------------------------------------+
 void SendToBackend(string symbol,string signal,string timeframe,double price,string message)
 {
@@ -176,7 +275,6 @@ void SendToBackend(string symbol,string signal,string timeframe,double price,str
                +"\"message\":\""+JsonEscape(message)+"\""
                +"}";
 
-   // ✅ copy WITHOUT terminating '\0'
    uchar post[];
    StringToCharArray(json, post, 0, StringLen(json), CP_UTF8);
 
@@ -187,28 +285,26 @@ void SendToBackend(string symbol,string signal,string timeframe,double price,str
    int res=WebRequest("POST", BASE_URL, reqHeaders, 5000, post, result, resHeaders);
 
    if(res==-1)
-   {
       Print("❌ WebRequest failed: ", GetLastError());
-   }
    else
-   {
-      string response=CharArrayToString(result,0,-1,CP_UTF8);
-      Print("Response Code: ",res," | Backend Reply: ",response);
-   }
+      Print("✅ Backend reply: ", CharArrayToString(result,0,-1,CP_UTF8));
 }
 
-
 //+------------------------------------------------------------------+
-//| Convert timeframe to string                                      |
+//| Timeframe to string                                              |
 //+------------------------------------------------------------------+
 string TimeframeToString(ENUM_TIMEFRAMES tf)
 {
    switch(tf)
    {
+      case PERIOD_M1:  return "M1";
       case PERIOD_M5:  return "M5";
       case PERIOD_M15: return "M15";
+      case PERIOD_M30: return "M30";
       case PERIOD_H1:  return "H1";
-      default:         return "Unknown";
+      case PERIOD_H4:  return "H4";
+      case PERIOD_D1:  return "D1";
+      default:         return "TF";
    }
 }
 //+------------------------------------------------------------------+
