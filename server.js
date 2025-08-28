@@ -16,7 +16,6 @@ app.use("/telegram-webhook", bodyParser.json());
 // For MT5 EA: accept raw text (and parse manually later)
 app.use("/meta", bodyParser.text({ type: "*/*" }));
 
-
 // === 1. Handle TradingView Webhook ===
 app.post("/tradingview-webhook", async (req, res) => {
   const { pair, event, timeframe, timestamp, volume } = req.body;
@@ -93,24 +92,25 @@ app.post("/meta", async (req, res) => {
     console.log("🟢 Raw MT5 body:", req.body);
 
     // If EA sends JSON-like text, parse it safely
-    const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const payload =
+      typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     const { symbol, signal, timeframe, price, timestamp } = payload;
 
     const formattedPrice = parseFloat(price).toFixed(2);
 
-    const formattedTime = new Date(timestamp || Date.now()).toLocaleString(
-      "en-US",
-      {
-        timeZone: "UTC",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      }
-    );
+    const date = new Date(Date.now());
+
+    const formattedTime = date.toLocaleString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+    console.log(formattedTime);
 
     const message =
       `📊 *MT5 Alert Triggered!*\n\n` +
@@ -148,4 +148,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🟢 Server running at http://localhost:${PORT}`);
 });
-  `1`
+`1`;
