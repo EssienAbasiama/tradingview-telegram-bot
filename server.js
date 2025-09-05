@@ -112,11 +112,20 @@ app.post("/meta", async (req, res) => {
 
     console.log(formattedTime);
 
+    let icon = "";
+
+    if (timeframe === "M1") {
+      icon = "🔴";
+    } else if (timeframe === "M5") {
+      icon = "🔵";
+    } else if (timeframe === "M15") {
+      icon = "🟢";
+    }
     const message =
       `📊 *MT5 Alert Triggered!*\n\n` +
       `*Symbol:* ${symbol}\n` +
       `*Signal:* ${signal}\n` +
-      `*Timeframe:* ${timeframe}\n` +
+      `*Timeframe:* ${icon} ${timeframe}\n` + 
       `*Price:* ${formattedPrice}\n` +
       `*Time:* ${formattedTime} UTC`;
 
