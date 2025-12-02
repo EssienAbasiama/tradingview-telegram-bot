@@ -121,11 +121,19 @@ app.post("/meta", async (req, res) => {
     } else if (timeframe === "M15") {
       icon = "🟢";
     }
+    const trendText = signal.includes("BULLISH")
+      ? "Bullish"
+      : signal.includes("BEARISH")
+      ? "Bearish"
+      : signal.includes("COUNTER")
+      ? "Counter Trend"
+      : "Unknown";
+
     const message =
       `📊 *MT5 Alert Triggered!*\n\n` +
       `*Symbol:* ${symbol}\n` +
-      `*Signal:* ${signal}\n` +
-      `*Timeframe:* ${icon} ${timeframe}\n` + 
+      `*Signal:* ${trendText}\n` +
+      `*Timeframe:* ${icon} ${timeframe}\n` +
       `*Price:* ${formattedPrice}\n` +
       `*Time:* ${formattedTime} UTC`;
 
