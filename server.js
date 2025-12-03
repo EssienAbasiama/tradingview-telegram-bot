@@ -102,13 +102,15 @@ app.post("/meta", async (req, res) => {
     else if (timeframe === "M5") icon = "🔵";
     else if (timeframe === "M15") icon = "🟢";
 
-    const trendText = signal.includes("BULLISH")
-      ? "Bullish"
-      : signal.includes("BEARISH")
-      ? "Bearish"
-      : signal.includes("COUNTER")
-      ? "Counter Trend"
-      : "Unknown";
+    // Map signal to display text
+    let trendText = "";
+    if (signal.includes("BULLISH")) trendText = "Bullish";
+    else if (signal.includes("BEARISH")) trendText = "Bearish";
+    else if (signal.includes("CROSS")) trendText = "EMA/SMA Cross";
+    else if (signal.includes("VOLUME_SPIKE")) trendText = "Volume Spike";
+    else if (signal.includes("TREND"))
+      trendText = signal.replace("TREND_", "Trend ");
+    else return res.status(200).send("Ignored non-trend signal");
 
     const message =
       `📊 *MT5 Alert Triggered!*\n\n` +
@@ -120,7 +122,8 @@ app.post("/meta", async (req, res) => {
 
     console.log("Formatted MT5 message:", message);
 
-    if (signal.includes("TTrend")) {
+    // Send TREND signals to the TREND channel
+    if (signal.includes("TREND")) {
       await axios.post(
         `https://api.telegram.org/bot${process.env.TREND_TELEGRAM_TOKEN}/sendMessage`,
         {
@@ -131,6 +134,7 @@ app.post("/meta", async (req, res) => {
       );
       console.log("📈 MT5 Trend Alert sent → TREND CHANNEL");
     } else {
+      // Send other signals (BULLISH, BEARISH, CROSS) to the main channel
       await axios.post(
         `https://api.telegram.org/bot${process.env.TELEGRAM_TOKEN}/sendMessage`,
         {
