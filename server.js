@@ -43,6 +43,41 @@ app.post("/tradingview-webhook", async (req, res) => {
   }
 });
 
+app.post("/telegram-webhook", async (req, res) => {
+  const message = req.body.message;
+
+  if (!message) return res.status(400).send("No message found");
+
+  const chatId = message.chat.id;
+  const firstName = message.chat.first_name || "friend";
+  const text = message.text?.toLowerCase() || "";
+
+  if (text === "/start") {
+    const welcomeText = `👋 Hi *${firstName}*!\n\nWelcome to our trading alert system.\nClick below to join our private channel:\n👉 [Join Now](${process.env.CHANNEL_LINK})`;
+
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${process.env.TELEGRAM_TOKEN}/sendMessage`,
+        {
+          chat_id: chatId,
+          text: welcomeText,
+          parse_mode: "Markdown",
+          disable_web_page_preview: true,
+        }
+      );
+
+      console.log("✅ Sent welcome message");
+      res.status(200).send("Welcome sent");
+    } catch (err) {
+      console.error("❌ Failed to send /start message:", err.message);
+      res.status(500).send("Failed to send welcome message");
+    }
+  } else {
+    // Optional: Handle other messages
+    res.status(200).send("OK");
+  }
+});
+
 app.post("/trend-webhook", async (req, res) => {
   const message = req.body.message;
   if (!message) return res.status(400).send("No message found");
