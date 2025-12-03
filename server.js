@@ -88,7 +88,7 @@ app.post("/trend-webhook", async (req, res) => {
   const text = message.text?.toLowerCase() || "";
 
   if (text === "/start") {
-    const welcomeText = `👋 Hi *${firstNameEscaped}*!\n\nWelcome to our trading alert system.\nClick below to join our private channel:\n👉 [Join Now](${process.env.TREND_CHANNEL_LINK})`;
+    const welcomeText = `👋 Hi *${firstName}*!\n\nWelcome to our trading alert system.\nClick below to join our private channel:\n👉 [Join Now](${process.env.TREND_CHANNEL_LINK})`;
 
     try {
       await axios.post(
