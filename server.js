@@ -9,6 +9,7 @@ const PORT = process.env.PORT || 5000;
 
 app.use("/tradingview-webhook", bodyParser.json());
 app.use("/telegram-webhook", bodyParser.json());
+app.use("/trend-webhook", bodyParser.json());
 app.use("/meta", bodyParser.text({ type: "*/*" }));
 
 app.post("/tradingview-webhook", async (req, res) => {
