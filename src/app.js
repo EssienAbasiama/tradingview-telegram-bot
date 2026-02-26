@@ -5,6 +5,9 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const app = express();
+// Some MT5 WebRequest clients send JSON with Content-Type: application/x-www-form-urlencoded
+// Accept the raw text for that content-type and attempt to parse it in the controller.
+app.use(bodyParser.text({ type: 'application/x-www-form-urlencoded', limit: '1mb' }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 

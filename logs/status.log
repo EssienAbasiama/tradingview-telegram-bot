@@ -1,0 +1,18 @@
+2026-02-26T00:00:04.458Z {}
+2026-02-26T00:00:06.747Z {}
+2026-02-26T00:00:08.783Z {}
+2026-02-26T00:00:09.327Z {}
+2026-02-26T00:14:00.319Z {"commandId":"1772064832548-vwwenc","type":"symbols_list","symbol":"","result":"ok","details":"Volatility 10 Index,Volatility 75 (1s) Index,EURUSD"}
+2026-02-26T00:14:15.263Z {"commandId":"1772064844404-5zfyx0","type":"add_pair","symbol":"Volatility 10 Index","result":"ok","details":"added symbol"}
+2026-02-26T00:14:15.966Z {"commandId":"1772064845458-ixpii7","type":"add_pair","symbol":"EURUSD","result":"ok","details":"added symbol"}
+2026-02-26T00:14:17.032Z {"commandId":"1772064846409-xp3qoi","type":"add_pair","symbol":"EURUSD","result":"ok","details":"added symbol"}
+2026-02-26T00:14:18.146Z {"commandId":"1772064847388-3sfmiq","type":"add_pair","symbol":"EURUSD","result":"ok","details":"added symbol"}
+2026-02-26T00:14:18.811Z {"commandId":"1772064849821-az4zxj","type":"add_pair","symbol":"Volatility 75 (1s) Index","result":"ok","details":"added symbol"}
+2026-02-26T00:14:21.116Z {}
+2026-02-26T00:14:22.047Z {}
+2026-02-26T00:14:22.995Z {}
+2026-02-26T00:14:23.991Z {}
+2026-02-26T00:14:24.511Z {}
+2026-02-26T00:14:57.543Z {"commandId":"1772064883073-yx3c9h","type":"remove_pair","symbol":"EURUSD","result":"ok","details":"removed symbol"}
+2026-02-26T00:15:01.511Z {}
+2026-02-26T00:15:02.466Z {}

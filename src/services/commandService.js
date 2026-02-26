@@ -5,6 +5,7 @@ const commands = []; // in-memory queue
 function addCommand(type, symbol = null, payload = {}, createdBy = null) {
     const cmd = new Command(type, symbol, payload, createdBy);
     commands.push(cmd);
+    console.log('Command added:', { id: cmd.id, type: cmd.type, symbol: cmd.symbol, createdBy: cmd.createdBy });
     return cmd;
 }
 

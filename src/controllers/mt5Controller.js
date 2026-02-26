@@ -1,6 +1,11 @@
+const fs = require('fs');
+const path = require('path');
 const commandService = require('../services/commandService');
 const pairService = require('../services/pairService');
 const telegramService = require('../services/telegramService');
+
+const LOG_DIR = path.join(__dirname, '..', '..', 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'status.log');
 
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const MAIN_CHANNEL = process.env.CHANNEL_CHAT_ID;
@@ -11,18 +16,67 @@ const ADMIN_CHAT = process.env.CHAT_ID;
 function getCommands(req, res) {
     const limit = parseInt(req.query.limit || '50', 10);
     const cmds = commandService.getPendingCommands(limit);
+    console.log('GET /api/commands returning', cmds.length, 'pending commands');
     return res.json({ commands: cmds });
 }
 
 // MT5 posts status updates and alerts here
 async function postStatus(req, res) {
     try {
-        const payload = req.body;
+        // Accept many MT5 WebRequest formats: JSON, raw text, x-www-form-urlencoded
+        // Normalize into object and add helpful logging for debugging.
+        console.log('/api/status incoming, content-type=', req.headers['content-type']);
+        let payload = req.body;
+
+        // If body-parser produced a string, try JSON parse or url-decoded JSON
+        if (typeof payload === 'string') {
+            const raw = payload.trim();
+            try {
+                payload = JSON.parse(raw);
+            } catch (e) {
+                const eq = raw.indexOf('=');
+                if (eq >= 0) {
+                    const candidate = raw.slice(eq + 1);
+                    try {
+                        payload = JSON.parse(decodeURIComponent(candidate));
+                    } catch (err2) {
+                        payload = {};
+                    }
+                } else {
+                    payload = {};
+                }
+            }
+        }
+
+        // If body-parser parsed urlencoded form into an object where the JSON string
+        // is the sole key (some servers do this when raw JSON is posted with bad headers)
+        if (typeof payload === 'object' && payload !== null) {
+            const keys = Object.keys(payload);
+            if (keys.length === 1 && typeof keys[0] === 'string' && keys[0].trim().startsWith('{')) {
+                try { payload = JSON.parse(keys[0]); }
+                catch (e) { /* leave as-is */ }
+            }
+            // common wrappers
+            if (payload && typeof payload.body === 'string') {
+                try { payload = JSON.parse(payload.body); } catch (e) { /* ignore */ }
+            }
+            if (payload && typeof payload.payload === 'string') {
+                try { payload = JSON.parse(decodeURIComponent(payload.payload)); } catch (e) { /* ignore */ }
+            }
+        }
+
+        console.log('/api/status payload keys=', payload && typeof payload === 'object' ? Object.keys(payload) : typeof payload);
+        // ensure logs directory
+        try {
+            if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+            fs.appendFile(LOG_FILE, new Date().toISOString() + ' ' + JSON.stringify(payload) + '\n', (e) => { if (e) console.error('log write error', e); });
+        } catch (e) { console.error('log setup error', e); }
         // Expect { commandId?, type, symbol, result, details }
         if (!payload || !payload.type) return res.status(400).send('Invalid payload');
 
         // Special handling for symbols list returned by MT5
-        if (payload.type === 'symbols_list') {
+        // Accept both 'symbols_list' (preferred) and legacy 'get_symbols'
+        if ((payload.type || '').toString().toLowerCase() === 'symbols_list' || (payload.type || '').toString().toLowerCase() === 'get_symbols') {
             // mark original command executed
             if (payload.commandId) commandService.markExecuted(payload.commandId);
 
@@ -31,18 +85,40 @@ async function postStatus(req, res) {
             const targetChat = (cmd && cmd.createdBy) ? cmd.createdBy : ADMIN_CHAT;
 
             // payload.symbols may be CSV string or an array
+            // Some EAs send symbols in `details` (CSV) — accept both.
             let symbols = [];
             if (Array.isArray(payload.symbols)) symbols = payload.symbols;
             else if (typeof payload.symbols === 'string' && payload.symbols.length) symbols = payload.symbols.split(',');
+            else if (typeof payload.details === 'string' && payload.details.length) symbols = payload.details.split(',');
+
+            // sanitize and trim
+            symbols = symbols.map(s => (s || '').toString().trim()).filter(s => s.length > 0);
+            // filter out placeholder responses like 'symbols sent' or other chatter
+            symbols = symbols.filter(s => {
+                const lower = s.toLowerCase();
+                return (
+                    lower !== 'symbols sent' &&
+                    lower !== 'ok' &&
+                    lower !== 'added symbol' &&
+                    lower !== 'symbols'
+                );
+            });// unique
+            symbols = Array.from(new Set(symbols));
 
             const buttons = symbols.map(s => [{ text: s, callback_data: `add_${s}` }]);
 
             if (buttons.length === 0) {
-                await telegramService.sendMessage(TOKEN, targetChat, 'No symbols returned from MT5');
+                try { await telegramService.sendMessage(TOKEN, targetChat, 'No symbols returned from MT5'); }
+                catch (e) { console.error('sendMessage error (no symbols):', e && e.message ? e.message : e); }
                 return res.json({ ok: true });
             }
 
-            await telegramService.sendMessage(TOKEN, targetChat, '📈 Select a pair to add:', buttons);
+            try {
+                await telegramService.sendMessage(TOKEN, targetChat, '📈 Select a pair to add:', buttons);
+            } catch (e) {
+                console.error('sendMessage error (symbols list):', e && e.message ? e.message : e);
+            }
+
             return res.json({ ok: true });
         }
 
@@ -53,17 +129,27 @@ async function postStatus(req, res) {
         const text = `*MT5 Status*\nType: ${payload.type}\nSymbol: ${payload.symbol || '-'}\nResult: ${payload.result || '-'}\nDetails: ${payload.details || ''}`;
 
         // TREND -> trend channel; CROSS/VOLUME -> main channel; else -> admin
-        if ((payload.type || '').toUpperCase().startsWith('TREND')) {
-            await telegramService.sendMessage(TOKEN, process.env.TREND_CHANNEL_CHAT_ID || TREND_CHANNEL, text);
-        } else if ((payload.type || '').toUpperCase().includes('CROSS') || (payload.type || '').toUpperCase().includes('VOLUME')) {
-            await telegramService.sendMessage(TOKEN, MAIN_CHANNEL, text);
-        } else {
-            await telegramService.sendMessage(TOKEN, ADMIN_CHAT, text);
+        try {
+            if ((payload.type || '').toUpperCase().startsWith('TREND')) {
+                await telegramService.sendMessage(TOKEN, process.env.TREND_CHANNEL_CHAT_ID || TREND_CHANNEL, text);
+            } else if ((payload.type || '').toUpperCase().includes('CROSS') || (payload.type || '').toUpperCase().includes('VOLUME')) {
+                await telegramService.sendMessage(TOKEN, MAIN_CHANNEL, text);
+            } else {
+                await telegramService.sendMessage(TOKEN, ADMIN_CHAT, text);
+            }
+        } catch (e) {
+            console.error('sendMessage error (status):', e && e.message ? e.message : e);
         }
 
         // If payload requests pair updates (e.g., add/remove) reflect in memory
         if (payload.type === 'add_pair' && payload.symbol) {
-            pairService.addPair(payload.symbol);
+            const s = payload.symbol.toString().trim();
+            // ignore placeholder/ack messages
+            if (!/\b(symbols?|sent|ok|added)\b/i.test(s)) {
+                pairService.addPair(s);
+            } else {
+                console.log('Ignoring add_pair for placeholder symbol:', s);
+            }
         }
         if (payload.type === 'remove_pair' && payload.symbol) {
             pairService.removePair(payload.symbol);
@@ -77,3 +163,17 @@ async function postStatus(req, res) {
 }
 
 module.exports = { getCommands, postStatus };
+
+// Debug endpoint implementation
+function getStatusLog(req, res) {
+    try {
+        if (!fs.existsSync(LOG_FILE)) return res.status(404).send('No log file');
+        const content = fs.readFileSync(LOG_FILE, 'utf8');
+        res.type('text/plain').send(content);
+    } catch (e) {
+        console.error('getStatusLog error', e);
+        res.status(500).send('Error reading log');
+    }
+}
+
+module.exports = { getCommands, postStatus, getStatusLog };
