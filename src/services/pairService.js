@@ -23,6 +23,14 @@ function listPairs() {
     return Object.values(pairs);
 }
 
+function clearPairs() {
+    const symbols = Object.keys(pairs);
+    for (const symbol of symbols) {
+        delete pairs[symbol];
+    }
+    return symbols.length;
+}
+
 function updatePair(symbol, changes) {
     const p = getPair(symbol);
     if (!p) return null;
@@ -30,4 +38,4 @@ function updatePair(symbol, changes) {
     return p;
 }
 
-module.exports = { addPair, removePair, getPair, listPairs, updatePair };
+module.exports = { addPair, removePair, getPair, listPairs, clearPairs, updatePair };

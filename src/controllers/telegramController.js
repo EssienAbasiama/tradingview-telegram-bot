@@ -63,6 +63,26 @@ async function handleWebhook(req, res) {
             return rows;
         }
 
+        function buildSlowMaKeyboard(symbol) {
+            const values = [50, 75, 100, 120, 150, 180, 200, 250, 300];
+            const rows = [];
+            for (let i = 0; i < values.length; i += 3) {
+                rows.push(values.slice(i, i + 3).map(ma => ({ text: `${ma}`, callback_data: `set_slow_ma|${symbol}|${ma}` })));
+            }
+            rows.push([{ text: '🔙 Back', callback_data: `settings|${symbol}` }]);
+            return rows;
+        }
+
+        function buildFastMaKeyboard(symbol) {
+            const values = [5, 8, 10, 12, 14, 20, 21, 30, 50];
+            const rows = [];
+            for (let i = 0; i < values.length; i += 3) {
+                rows.push(values.slice(i, i + 3).map(ma => ({ text: `${ma}`, callback_data: `set_fast_ma|${symbol}|${ma}` })));
+            }
+            rows.push([{ text: '🔙 Back', callback_data: `settings|${symbol}` }]);
+            return rows;
+        }
+
         if (body.message) {
             const chatId = body.message.chat.id;
             const firstName = body.message.chat.first_name || 'friend';
@@ -97,7 +117,8 @@ async function handleWebhook(req, res) {
                 const mainMenu = [
                     [{ text: '🏁 Start' }, { text: '📊 Symbol Management' }],
                     [{ text: '🔔 Alert Controls' }, { text: '⚙ Strategy Settings' }],
-                    [{ text: '📡 System Status' }, { text: '❓ Help' }]
+                    [{ text: '📡 System Status' }, { text: '❓ Help' }],
+                    [{ text: '♻ Reset Pairs' }]
                 ];
 
                 sessionService.clearSession(chatId);
@@ -140,24 +161,38 @@ async function handleWebhook(req, res) {
             }
 
             if (text.startsWith('📋 Active Pairs') || text.startsWith('/pairs')) {
-                const pairs = pairService.listPairs();
-                if (pairs.length === 0) {
-                    safeSend(TOKEN, chatId, '⚠ No active pairs.');
-                    return res.sendStatus(200);
-                }
+                // Ask MT5 for the latest symbols
+                commandService.addCommand('get_symbols', null, {}, chatId);
+                safeSend(TOKEN, chatId, '🔄 Fetching active EMA pairs from MT5...');
 
-                sessionService.updateSession(chatId, { section: 'active_pairs' });
-                const pairButtons = pairs.map(p => [{ text: p.symbol, callback_data: `settings|${p.symbol}` }]);
-                safeSend(TOKEN, chatId, `📋 Active Pairs (${pairs.length})\n\nSelect a pair to manage:`, pairButtons);
+                setTimeout(() => {
+                    // Get all pairs known in pairService (treat all as active)
+                    const activePairs = pairService.listPairs();
+                    if (activePairs.length === 0)
+                        return safeSend(TOKEN, chatId, '⚠ No active pairs.');
+
+                    const buttons = activePairs.map(p => [{ text: p.symbol, callback_data: `settings|${p.symbol}` }]);
+                    safeSend(TOKEN, chatId, `📋 Active Pairs (${activePairs.length})\n\nSelect a pair to manage:`, buttons);
+                }, 2000);
+
                 return res.sendStatus(200);
             }
 
             if (text === '➖ Remove Pair') {
-                const pairs = pairService.listPairs();
-                if (pairs.length === 0) { safeSend(TOKEN, chatId, '⚠ No active pairs to remove.'); return res.sendStatus(200); }
-                sessionService.updateSession(chatId, { section: 'remove_pair' });
-                const pairButtons = pairs.map(p => [{ text: p.symbol, callback_data: `remove_${p.symbol}` }]);
-                safeSend(TOKEN, chatId, '➖ Select a pair to remove:', pairButtons);
+                commandService.addCommand('get_symbols', null, {}, chatId);
+                safeSend(TOKEN, chatId, '🔄 Fetching active EMA pairs from MT5...');
+
+                setTimeout(() => {
+                    // Get all pairs known in pairService (treat all as active)
+                    const activePairs = pairService.listPairs();
+                    if (activePairs.length === 0)
+                        return safeSend(TOKEN, chatId, '⚠ No active pairs to remove.');
+
+                    sessionService.updateSession(chatId, { section: 'remove_pair' });
+                    const buttons = activePairs.map(p => [{ text: p.symbol, callback_data: `remove_${p.symbol}` }]);
+                    safeSend(TOKEN, chatId, '➖ Select a pair to remove:', buttons);
+                }, 2000);
+
                 return res.sendStatus(200);
             }
 
@@ -192,12 +227,20 @@ async function handleWebhook(req, res) {
                 return res.sendStatus(200);
             }
 
+            if (text === '♻ Reset Pairs') {
+                const removedCount = pairService.clearPairs();
+                sessionService.clearSession(chatId);
+                safeSend(TOKEN, chatId, `♻ Reset complete. Cleared ${removedCount} pair(s).\n\nYou can now use ➕ Add Pair to load symbols again from MT5.`);
+                return res.sendStatus(200);
+            }
+
             if (text === '🔙 Back') {
                 sessionService.clearSession(chatId);
                 const mainMenu = [
                     [{ text: '🏁 Start' }, { text: '📊 Symbol Management' }],
                     [{ text: '🔔 Alert Controls' }, { text: '⚙ Strategy Settings' }],
-                    [{ text: '📡 System Status' }, { text: '❓ Help' }]
+                    [{ text: '📡 System Status' }, { text: '❓ Help' }],
+                    [{ text: '♻ Reset Pairs' }]
                 ];
                 safeSend(TOKEN, chatId, 'Back to main menu', mainMenu, true);
                 return res.sendStatus(200);
@@ -333,8 +376,55 @@ Select an option below 👇`;
 
             if (action === 'change_fast_ma' || action === 'change_slow_ma') {
                 const field = action === 'change_fast_ma' ? 'fastMA' : 'slowMA';
-                sessionService.updateSession(chatId, { awaitingInput: { field, symbol }, promptMessageId: callback.message.message_id });
-                safeEdit(TOKEN, chatId, callback.message.message_id, `Enter new ${field === 'fastMA' ? 'Fast MA' : 'Slow MA'} value for ${symbol}:`);
+                if (field === 'fastMA') {
+                    sessionService.updateSession(chatId, { awaitingInput: null, promptMessageId: callback.message.message_id });
+                    safeEdit(TOKEN, chatId, callback.message.message_id, `Enter new Fast MA value for ${symbol}:`, buildFastMaKeyboard(symbol));
+                    return res.sendStatus(200);
+                }
+
+                if (field === 'slowMA') {
+                    sessionService.updateSession(chatId, { awaitingInput: null, promptMessageId: callback.message.message_id });
+                    safeEdit(TOKEN, chatId, callback.message.message_id, `Enter new Slow MA value for ${symbol}:`, buildSlowMaKeyboard(symbol));
+                    return res.sendStatus(200);
+                }
+                return res.sendStatus(200);
+            }
+
+            if (action === 'set_fast_ma') {
+                const maValue = parseInt(value, 10);
+                if (Number.isNaN(maValue) || maValue <= 0 || !symbol) {
+                    safeSend(TOKEN, chatId, '❌ Invalid Fast MA selection.');
+                    return res.sendStatus(200);
+                }
+
+                const settings = { fastMA: maValue };
+                commandService.addCommand('update_strategy', symbol, { settings }, chatId);
+                pairService.updatePair(symbol, settings);
+                sessionService.updateSession(chatId, { awaitingInput: null, promptMessageId: null });
+
+                const pair = pairService.getPair(symbol);
+                if (pair) {
+                    safeEdit(TOKEN, chatId, callback.message.message_id, buildSettingsText(symbol, pair), buildSettingsKeyboard(symbol, pair));
+                }
+                return res.sendStatus(200);
+            }
+
+            if (action === 'set_slow_ma') {
+                const maValue = parseInt(value, 10);
+                if (Number.isNaN(maValue) || maValue <= 0 || !symbol) {
+                    safeSend(TOKEN, chatId, '❌ Invalid Slow MA selection.');
+                    return res.sendStatus(200);
+                }
+
+                const settings = { slowMA: maValue };
+                commandService.addCommand('update_strategy', symbol, { settings }, chatId);
+                pairService.updatePair(symbol, settings);
+                sessionService.updateSession(chatId, { awaitingInput: null, promptMessageId: null });
+
+                const pair = pairService.getPair(symbol);
+                if (pair) {
+                    safeEdit(TOKEN, chatId, callback.message.message_id, buildSettingsText(symbol, pair), buildSettingsKeyboard(symbol, pair));
+                }
                 return res.sendStatus(200);
             }
 
@@ -363,7 +453,8 @@ Select an option below 👇`;
                 const mainMenu = [
                     [{ text: '🏁 Start' }, { text: '📊 Symbol Management' }],
                     [{ text: '🔔 Alert Controls' }, { text: '⚙ Strategy Settings' }],
-                    [{ text: '📡 System Status' }, { text: '❓ Help' }]
+                    [{ text: '📡 System Status' }, { text: '❓ Help' }],
+                    [{ text: '♻ Reset Pairs' }]
                 ];
                 safeEdit(TOKEN, chatId, callback.message.message_id, '🤖 MT5 Alert Control Panel\n\nChoose an option:', mainMenu);
                 return res.sendStatus(200);

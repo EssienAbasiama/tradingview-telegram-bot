@@ -10,6 +10,7 @@ router.get('/commands', (req, res) => {
     return mt5Controller.getCommands(req, res);
 });
 
+
 router.post('/status', (req, res) => {
     if (!mt5Controller || typeof mt5Controller.postStatus !== 'function') {
         console.error('mt5Controller.postStatus missing');
