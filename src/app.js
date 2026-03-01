@@ -5,12 +5,19 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const app = express();
-// Some MT5 WebRequest clients send JSON with Content-Type: application/x-www-form-urlencoded
-// Accept the raw text for that content-type and attempt to parse it in the controller.
-app.use(bodyParser.text({ type: 'application/x-www-form-urlencoded', limit: '1mb' }));
-// capture raw body for robust parsing in controllers
-app.use(bodyParser.json({ verify: (req, res, buf) => { req.rawBody = buf && buf.toString ? buf.toString() : ''; } }));
-app.use(bodyParser.urlencoded({ extended: true, verify: (req, res, buf) => { req.rawBody = buf && buf.toString ? buf.toString() : req.rawBody || ''; } }));
+// Parse JSON and urlencoded first (with a verify hook that captures the raw bytes)
+app.use(bodyParser.json({ limit: '1mb', verify: (req, res, buf) => { req.rawBody = buf && buf.toString ? buf.toString() : ''; } }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '1mb', verify: (req, res, buf) => { req.rawBody = buf && buf.toString ? buf.toString() : req.rawBody || ''; } }));
+// For any other content-type (text/plain, custom MT5 wrappers) capture raw text so controllers can attempt parsing
+// Don't override `req.body` for application/json — capture raw body only when not already set
+app.use((req, res, next) => {
+    if (req.rawBody && req.rawBody.length) return next();
+    let data = '';
+    req.setEncoding && req.setEncoding('utf8');
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => { req.rawBody = req.rawBody || data; next(); });
+    req.on('error', () => next());
+});
 
 // Routes
 const telegramRoutes = require('./routes/telegramRoutes');

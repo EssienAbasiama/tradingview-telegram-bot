@@ -16,8 +16,9 @@ async function postWithRetry(url, payload, retries = 2) {
     throw lastErr;
 }
 
-async function sendMessage(token, chatId, text, keyboard = null, isReplyKeyboard = false) {
-    const payload = { chat_id: chatId, text, parse_mode: 'Markdown' };
+async function sendMessage(token, chatId, text, keyboard = null, isReplyKeyboard = false, parseMode = 'Markdown') {
+    const payload = { chat_id: chatId, text };
+    if (parseMode) payload.parse_mode = parseMode;
     if (keyboard) {
         payload.reply_markup = isReplyKeyboard
             ? { keyboard, resize_keyboard: true, one_time_keyboard: false }

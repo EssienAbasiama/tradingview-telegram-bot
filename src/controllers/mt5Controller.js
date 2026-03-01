@@ -118,13 +118,13 @@ async function postStatus(req, res) {
             const buttons = symbols.map(s => [{ text: s, callback_data: `add_${s}` }]);
 
             if (buttons.length === 0) {
-                try { await telegramService.sendMessage(TOKEN, targetChat, 'No symbols returned from MT5'); }
+                try { await telegramService.sendMessage(TOKEN, targetChat, 'No symbols returned from MT5', null, false, null); }
                 catch (e) { console.error('sendMessage error (no symbols):', e && e.message ? e.message : e); }
                 return res.json({ ok: true });
             }
 
             try {
-                await telegramService.sendMessage(TOKEN, targetChat, '📈 Select a pair to add:', buttons);
+                await telegramService.sendMessage(TOKEN, targetChat, '📈 Select a pair to add:', buttons, false, null);
             } catch (e) {
                 console.error('sendMessage error (symbols list):', e && e.message ? e.message : e);
             }
@@ -152,7 +152,7 @@ async function postStatus(req, res) {
             symbols = Array.from(new Set(symbols));
 
             if (symbols.length === 0) {
-                try { await telegramService.sendMessage(TOKEN, targetChat, 'No active symbols reported by MT5'); }
+                try { await telegramService.sendMessage(TOKEN, targetChat, 'No active symbols reported by MT5', null, false, null); }
                 catch (e) { console.error('sendMessage error (no active symbols):', e && e.message ? e.message : e); }
                 return res.json({ ok: true });
             }
@@ -168,7 +168,7 @@ async function postStatus(req, res) {
                 return [{ text: s, callback_data: `settings|${s}` }];
             });
             try {
-                await telegramService.sendMessage(TOKEN, targetChat, `📋 Active Pairs (${symbols.length})\n\nSelect a pair to manage:`, buttons);
+                await telegramService.sendMessage(TOKEN, targetChat, `📋 Active Pairs (${symbols.length})\n\nSelect a pair to manage:`, buttons, false, null);
             } catch (e) { console.error('sendMessage error (active_symbols):', e && e.message ? e.message : e); }
 
             return res.json({ ok: true });
@@ -187,13 +187,13 @@ async function postStatus(req, res) {
             if (ptype.startsWith('TREND')) {
                 const target = process.env.TREND_CHANNEL_CHAT_ID || TREND_CHANNEL;
                 console.log('Sending TREND message to', target);
-                await telegramService.sendMessage(TOKEN, target, text);
+                await telegramService.sendMessage(TOKEN, target, text, null, false, null);
             } else if (ptype.includes('CROSS') || ptype.includes('VOLUME')) {
                 console.log('Sending CROSS/VOLUME message to', MAIN_CHANNEL);
-                await telegramService.sendMessage(TOKEN, MAIN_CHANNEL, text);
+                await telegramService.sendMessage(TOKEN, MAIN_CHANNEL, text, null, false, null);
             } else {
                 console.log('Sending OTHER status message to admin', ADMIN_CHAT);
-                await telegramService.sendMessage(TOKEN, ADMIN_CHAT, text);
+                await telegramService.sendMessage(TOKEN, ADMIN_CHAT, text, null, false, null);
             }
         } catch (e) {
             console.error('sendMessage error (status):', e && e.message ? e.message : e);

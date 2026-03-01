@@ -311,7 +311,9 @@ void DrawXMark(datetime t, double price)
 //=========================== BACKEND =============================//
 void SendToBackend(string symbol, string signal, string tf, double price, string msg)
 {
-   string json = "{\"type\":\"" + signal + "\",\"symbol\":\"" + symbol + "\",\"result\":\"" + signal + "\",\"details\":\"" + msg + "\",\"price\":\"" + DoubleToString(price, _Digits) + "\"}";
+   // escape JSON string values to ensure valid JSON when msg contains newlines or quotes
+   string escDetails = JsonEscape(msg);
+   string json = "{\"type\":\"" + signal + "\",\"symbol\":\"" + symbol + "\",\"result\":\"" + signal + "\",\"details\":\"" + escDetails + "\",\"price\":\"" + DoubleToString(price, _Digits) + "\"}";
    uchar post[];
    StringToCharArray(json, post, 0, StringLen(json));
    string headers = "Content-Type: application/json\r\n";
@@ -319,10 +321,15 @@ void SendToBackend(string symbol, string signal, string tf, double price, string
    uchar result[];
    string resHeaders;
 
-   int respCode = WebRequest("POST", BASE_URL, headers, cookie, 5000, post, StringLen(json), result, resHeaders);
+   PrintFormat("WebRequest POST -> %s (payload len=%d)", BASE_URL, StringLen(json));
+   int respCode = WebRequest("POST", BASE_URL, headers, cookie, 10000, post, StringLen(json), result, resHeaders);
    PrintFormat("WebRequest POST -> %s resp=%d", BASE_URL, respCode);
    if (ArraySize(result) > 0)
       Print("POST response: " + CharArrayToString(result));
+   else
+      Print("POST response: <empty>");
+   if (respCode <= 0)
+      PrintFormat("WebRequest error: respCode=%d, headers=%s", respCode, resHeaders);
 }
 
 //=========================== COMMAND POLLING ======================//
@@ -374,7 +381,8 @@ string JsonGetValue(const string json, const string key, int startPos = 0)
 
 void SendStatusForCommand(string commandId, string type, string symbol, string resultText, string details)
 {
-   string json = "{\"commandId\":\"" + commandId + "\",\"type\":\"" + type + "\",\"symbol\":\"" + symbol + "\",\"result\":\"" + resultText + "\",\"details\":\"" + details + "\"}";
+   string escDetails = JsonEscape(details);
+   string json = "{\"commandId\":\"" + commandId + "\",\"type\":\"" + type + "\",\"symbol\":\"" + symbol + "\",\"result\":\"" + resultText + "\",\"details\":\"" + escDetails + "\"}";
    uchar post[];
    StringToCharArray(json, post, 0, StringLen(json));
    string headers = "Content-Type: application/json\r\n";
@@ -382,8 +390,15 @@ void SendStatusForCommand(string commandId, string type, string symbol, string r
    uchar resp[];
    string resHeaders;
 
-   int respCode = WebRequest("POST", BASE_URL, headers, cookie, 5000, post, StringLen(json), resp, resHeaders);
+   PrintFormat("SendStatusForCommand POST -> %s (payload len=%d)", BASE_URL, StringLen(json));
+   int respCode = WebRequest("POST", BASE_URL, headers, cookie, 10000, post, StringLen(json), resp, resHeaders);
    PrintFormat("SendStatusForCommand POST -> %s resp=%d", BASE_URL, respCode);
+   if (ArraySize(resp) > 0)
+      Print("SendStatusForCommand response: " + CharArrayToString(resp));
+   else
+      Print("SendStatusForCommand response: <empty>");
+   if (respCode <= 0)
+      PrintFormat("SendStatusForCommand error: respCode=%d, headers=%s", respCode, resHeaders);
 }
 
 void ParseAndExecuteCommands(string json)
@@ -446,6 +461,12 @@ void ParseAndExecuteCommands(string json)
       else if (type == "get_active_symbols")
       {
          SendActiveSymbols(id);
+      }
+      else if (type == "test_alert")
+      {
+         // Execute a test alert on demand and report completion
+         TestAlerts();
+         SendStatusForCommand(id, type, symbol, "ok", "test alert dispatched");
       }
       else if (StringFindPos(type, "toggle_") >= 0)
       {
@@ -544,4 +565,17 @@ void TestAlerts()
    string trendMsg = "Trend update " + sym + "\nPERIOD_H4: BULLISH\nPERIOD_D1: BULLISH";
    SendToBackend(sym, "TREND_BULLISH", "PERIOD_H4", price, trendMsg);
    Print("Test TREND alert sent");
+}
+
+// Simple JSON string escaper
+string JsonEscape(string s)
+{
+   if (StringLen(s) == 0)
+      return s;
+   StringReplace(s, "\\", "\\\\");
+   StringReplace(s, '"', "\\\"");
+   StringReplace(s, "\n", "\\n");
+   StringReplace(s, "\r", "\\r");
+   StringReplace(s, "\t", "\\t");
+   return s;
 }
