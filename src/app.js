@@ -8,8 +8,9 @@ const app = express();
 // Some MT5 WebRequest clients send JSON with Content-Type: application/x-www-form-urlencoded
 // Accept the raw text for that content-type and attempt to parse it in the controller.
 app.use(bodyParser.text({ type: 'application/x-www-form-urlencoded', limit: '1mb' }));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+// capture raw body for robust parsing in controllers
+app.use(bodyParser.json({ verify: (req, res, buf) => { req.rawBody = buf && buf.toString ? buf.toString() : ''; } }));
+app.use(bodyParser.urlencoded({ extended: true, verify: (req, res, buf) => { req.rawBody = buf && buf.toString ? buf.toString() : req.rawBody || ''; } }));
 
 // Routes
 const telegramRoutes = require('./routes/telegramRoutes');

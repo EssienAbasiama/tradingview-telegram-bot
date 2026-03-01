@@ -118,7 +118,8 @@ async function handleWebhook(req, res) {
                     [{ text: '🏁 Start' }, { text: '📊 Symbol Management' }],
                     [{ text: '🔔 Alert Controls' }, { text: '⚙ Strategy Settings' }],
                     [{ text: '📡 System Status' }, { text: '❓ Help' }],
-                    [{ text: '♻ Reset Pairs' }]
+                    [{ text: '♻ Reset Pairs' }],
+                    [{ text: '🧪 Test Alert' }]
                 ];
 
                 sessionService.clearSession(chatId);
@@ -161,38 +162,16 @@ async function handleWebhook(req, res) {
             }
 
             if (text.startsWith('📋 Active Pairs') || text.startsWith('/pairs')) {
-                // Ask MT5 for the latest symbols
-                commandService.addCommand('get_symbols', null, {}, chatId);
+                // Request MT5 to return active (monitored) symbols and let MT5 reply with buttons
+                const cmd = commandService.addCommand('get_active_symbols', null, { mode: 'view' }, chatId);
                 safeSend(TOKEN, chatId, '🔄 Fetching active EMA pairs from MT5...');
-
-                setTimeout(() => {
-                    // Get all pairs known in pairService (treat all as active)
-                    const activePairs = pairService.listPairs();
-                    if (activePairs.length === 0)
-                        return safeSend(TOKEN, chatId, '⚠ No active pairs.');
-
-                    const buttons = activePairs.map(p => [{ text: p.symbol, callback_data: `settings|${p.symbol}` }]);
-                    safeSend(TOKEN, chatId, `📋 Active Pairs (${activePairs.length})\n\nSelect a pair to manage:`, buttons);
-                }, 2000);
-
                 return res.sendStatus(200);
             }
 
             if (text === '➖ Remove Pair') {
-                commandService.addCommand('get_symbols', null, {}, chatId);
+                // Request MT5 to return active symbols; MT5 response will be sent back with remove buttons
+                const cmd = commandService.addCommand('get_active_symbols', null, { mode: 'remove' }, chatId);
                 safeSend(TOKEN, chatId, '🔄 Fetching active EMA pairs from MT5...');
-
-                setTimeout(() => {
-                    // Get all pairs known in pairService (treat all as active)
-                    const activePairs = pairService.listPairs();
-                    if (activePairs.length === 0)
-                        return safeSend(TOKEN, chatId, '⚠ No active pairs to remove.');
-
-                    sessionService.updateSession(chatId, { section: 'remove_pair' });
-                    const buttons = activePairs.map(p => [{ text: p.symbol, callback_data: `remove_${p.symbol}` }]);
-                    safeSend(TOKEN, chatId, '➖ Select a pair to remove:', buttons);
-                }, 2000);
-
                 return res.sendStatus(200);
             }
 
@@ -227,6 +206,13 @@ async function handleWebhook(req, res) {
                 return res.sendStatus(200);
             }
 
+            if (text === '🧪 Test Alert') {
+                // Queue a test_alert command for MT5 to execute TestAlerts()
+                const cmd = commandService.addCommand('test_alert', null, {}, chatId);
+                safeSend(TOKEN, chatId, `🧪 Test alert requested (id: ${cmd.id})`);
+                return res.sendStatus(200);
+            }
+
             if (text === '♻ Reset Pairs') {
                 const removedCount = pairService.clearPairs();
                 sessionService.clearSession(chatId);
@@ -240,7 +226,8 @@ async function handleWebhook(req, res) {
                     [{ text: '🏁 Start' }, { text: '📊 Symbol Management' }],
                     [{ text: '🔔 Alert Controls' }, { text: '⚙ Strategy Settings' }],
                     [{ text: '📡 System Status' }, { text: '❓ Help' }],
-                    [{ text: '♻ Reset Pairs' }]
+                    [{ text: '♻ Reset Pairs' }],
+                    [{ text: '🧪 Test Alert' }]
                 ];
                 safeSend(TOKEN, chatId, 'Back to main menu', mainMenu, true);
                 return res.sendStatus(200);
@@ -448,13 +435,21 @@ Select an option below 👇`;
                 return res.sendStatus(200);
             }
 
+            if (data === 'sys_test') {
+                // Callback from System Status inline button — queue test_alert for MT5
+                const cmd = commandService.addCommand('test_alert', null, {}, chatId);
+                safeSend(TOKEN, chatId, `🧪 Test alert queued (id: ${cmd.id})`);
+                return res.sendStatus(200);
+            }
+
             if (data === 'back_main') {
                 sessionService.clearSession(chatId);
                 const mainMenu = [
                     [{ text: '🏁 Start' }, { text: '📊 Symbol Management' }],
                     [{ text: '🔔 Alert Controls' }, { text: '⚙ Strategy Settings' }],
                     [{ text: '📡 System Status' }, { text: '❓ Help' }],
-                    [{ text: '♻ Reset Pairs' }]
+                    [{ text: '♻ Reset Pairs' }],
+                    [{ text: '🧪 Test Alert' }]
                 ];
                 safeEdit(TOKEN, chatId, callback.message.message_id, '🤖 MT5 Alert Control Panel\n\nChoose an option:', mainMenu);
                 return res.sendStatus(200);

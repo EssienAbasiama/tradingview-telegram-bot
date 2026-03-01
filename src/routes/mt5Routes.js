@@ -19,6 +19,15 @@ router.post('/status', (req, res) => {
     return mt5Controller.postStatus(req, res);
 });
 
+// MT5 /meta alert endpoint (accepts raw text/JSON from EA)
+router.post('/meta', (req, res) => {
+    if (!mt5Controller || typeof mt5Controller.handleMetaAlert !== 'function') {
+        console.error('mt5Controller.handleMetaAlert missing');
+        return res.status(500).send('handler missing');
+    }
+    return mt5Controller.handleMetaAlert(req, res);
+});
+
 // Debug: view raw MT5 status log
 router.get('/debug/status-log', (req, res) => {
     if (!mt5Controller || typeof mt5Controller.getStatusLog !== 'function') {
