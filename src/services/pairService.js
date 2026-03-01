@@ -1,6 +1,9 @@
+const fs = require('fs');
+const path = require('path');
 const Pair = require('../models/pairModel');
 
 const pairs = {}; // key: symbol -> Pair
+const SYMBOLS_FILE = path.join(__dirname, '..', '..', 'symbols.txt');
 
 function addPair(symbol) {
     symbol = symbol.toUpperCase();
@@ -27,6 +30,12 @@ function clearPairs() {
     const symbols = Object.keys(pairs);
     for (const symbol of symbols) {
         delete pairs[symbol];
+    }
+    // Also clear the persisted symbols file so the EA has no saved active pairs
+    try {
+        fs.writeFileSync(SYMBOLS_FILE, '');
+    } catch (e) {
+        console.error('pairService.clearPairs: failed to clear symbols file', e && e.message ? e.message : e);
     }
     return symbols.length;
 }
