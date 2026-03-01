@@ -12,6 +12,7 @@ string COMMANDS_URL = "https://35d2-102-88-111-120.ngrok-free.app/api/commands";
 
 //=========================== GLOBAL CONTROL =======================//
 bool IsPaused = false;
+bool TestSent = false; // <-- Added (does not remove anything)
 string SYMBOLS_FILE = "symbols.txt";
 
 //=========================== STRUCT ===============================//
@@ -51,6 +52,14 @@ int OnInit()
 void OnTick()
 {
    CheckBackendCommands();
+
+   // Send test alerts once after first tick
+   if (!TestSent)
+   {
+      TestAlerts();
+      TestSent = true;
+   }
+
    if (IsPaused)
       return;
 
@@ -129,12 +138,11 @@ void LoadSymbols()
    {
       string sym = FileReadString(file);
       if (StringLen(sym) > 0)
-         AddSymbolInternal(sym); // use internal to avoid saving repeatedly
+         AddSymbolInternal(sym);
    }
    FileClose(file);
 }
 
-// Internal add used only during LoadSymbols
 void AddSymbolInternal(string sym)
 {
    for (int i = 0; i < SymbolCount; i++)
@@ -470,7 +478,6 @@ void SendAvailableSymbols(string commandId)
    {
       string sym = SymbolName(i, true);
 
-      // Skip symbols already added to the EA
       bool alreadyAdded = false;
       for (int j = 0; j < SymbolCount; j++)
       {
@@ -483,7 +490,6 @@ void SendAvailableSymbols(string commandId)
       if (alreadyAdded)
          continue;
 
-      // Add symbol to list
       if (StringLen(list) > 0)
          list += ",";
       list += sym;
@@ -491,7 +497,7 @@ void SendAvailableSymbols(string commandId)
 
    SendStatusForCommand(commandId, "symbols_list", "ok", list, list);
 }
-// Read symbols file and return comma-separated list
+
 string ReadSymbolsListFromFile()
 {
    string list = "";
@@ -524,19 +530,18 @@ void SendActiveSymbols(string commandId)
 
    SendStatusForCommand(commandId, "active_symbols", "ok", list, list);
 }
-//--------------------- TEST ALERTS ---------------------
+
+//--------------------- TEST ALERTS ---------------------//
 void TestAlerts()
 {
    string sym = _Symbol;
    double price = SymbolInfoDouble(sym, SYMBOL_BID);
 
-   // Simulate CROSS alert
    string crossMsg = "EMA/SMA Cross on " + sym + "\nTF: PERIOD_H1\nPrice: " + DoubleToString(price, _Digits);
-   SendToBackend(sym, "CROSS", "PERIOD_H1", price, crossMsg); // <--- use SendToBackend
+   SendToBackend(sym, "CROSS", "PERIOD_H1", price, crossMsg);
    Print("Test CROSS alert sent");
 
-   // Simulate TREND alert
    string trendMsg = "Trend update " + sym + "\nPERIOD_H4: BULLISH\nPERIOD_D1: BULLISH";
-   SendToBackend(sym, "TREND_BULLISH", "PERIOD_H4", price, trendMsg); // <--- use SendToBackend
+   SendToBackend(sym, "TREND_BULLISH", "PERIOD_H4", price, trendMsg);
    Print("Test TREND alert sent");
 }
