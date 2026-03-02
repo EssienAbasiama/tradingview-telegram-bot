@@ -215,6 +215,8 @@ async function handleWebhook(req, res) {
 
             if (text === '♻ Reset Pairs') {
                 const removedCount = pairService.clearPairs();
+                // enqueue a reset_pairs command so the EA clears its in-memory symbols too
+                try { commandService.addCommand('reset_pairs', null, {}, chatId); } catch (e) { console.error('failed to enqueue reset_pairs command', e); }
                 sessionService.clearSession(chatId);
                 safeSend(TOKEN, chatId, `♻ Reset complete. Cleared ${removedCount} pair(s).\n\nYou can now use ➕ Add Pair to load symbols again from MT5.`);
                 return res.sendStatus(200);

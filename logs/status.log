@@ -34,3 +34,7 @@
 2026-03-01T23:07:20.337Z {"type":"CROSS","symbol":"Volatility 10 Index","result":"CROSS","details":"EMA/SMA Cross on Volatility 10 Index\nTF: PERIOD_H1\nPrice: 5011.760","price":"5011.760"}
 2026-03-01T23:07:22.576Z {"type":"CROSS","symbol":"GBPUSD","result":"CROSS","details":"EMA/SMA Cross on GBPUSD\nTF: PERIOD_H1\nPrice: 1.\"2","price":"1.342"}
 2026-03-01T23:07:24.246Z {"type":"CROSS","symbol":"DSHUSD","result":"CROSS","details":"EMA/SMA Cross on DSHUSD\nTF: PERIOD_H1\nPrice: 31.836","price":"31.836"}
+2026-03-01T23:48:14.213Z {"commandId":"1772408883179-efqgc1","type":"symbols_list","symbol":"ok","result":"Volatility 75 (1s) Index,DOTUSD","details":"Volatility 75 (1s) Index,DOTUSD"}
+2026-03-01T23:48:47.286Z {"commandId":"1772408914696-72f9uh","type":"symbols_list","symbol":"ok","result":"Volatility 75 (1s) Index,DOTUSD","details":"Volatility 75 (1s) Index,DOTUSD"}
+2026-03-02T00:00:05.259Z {"type":"CROSS","symbol":"ETCUSD","result":"CROSS","details":"EMA/SMA Cross on ETCUSD\nTF: PERIOD_H1\nPrice: 8.460","price":"8.460"}
+2026-03-02T00:00:06.676Z {"type":"TREND_BEARISH","symbol":"ETCUSD","result":"TREND_BEARISH","details":"Trend update ETCUSD\nPERIOD_H4: BEARISH\nPERIOD_D1: BEARISH","price":"8.463"}

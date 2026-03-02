@@ -111,6 +111,24 @@ void RemoveSymbol(string sym)
    }
 }
 
+void ResetAllSymbols()
+{
+   // Clear memory
+   SymbolCount = 0;
+   ArrayResize(Symbols, 0);
+
+   // Clear file by opening in WRITE mode and closing immediately
+   int file = FileOpen(SYMBOLS_FILE, FILE_WRITE | FILE_TXT);
+   if (file >= 0)
+   {
+      FileClose(file);
+      Print("All symbols reset. symbols.txt cleared.");
+   }
+   else
+   {
+      Print("Failed to reset symbols file");
+   }
+}
 //=========================== PERSISTENCE ==========================//
 void SaveSymbols()
 {
@@ -467,6 +485,12 @@ void ParseAndExecuteCommands(string json)
          // Execute a test alert on demand and report completion
          TestAlerts();
          SendStatusForCommand(id, type, symbol, "ok", "test alert dispatched");
+      }
+      else if (type == "reset_pairs")
+      {
+         // Clear EA in-memory symbols and truncate symbols file
+         ResetAllSymbols();
+         SendStatusForCommand(id, type, "", "ok", "reset pairs");
       }
       else if (StringFindPos(type, "toggle_") >= 0)
       {
