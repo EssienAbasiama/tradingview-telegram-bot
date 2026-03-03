@@ -64,7 +64,7 @@ async function handleWebhook(req, res) {
         }
 
         function buildSlowMaKeyboard(symbol) {
-            const values = [50, 75, 100, 120, 150, 180, 200, 250, 300];
+            const values = [10, 20, 50, 75, 100, 120, 150, 180, 200, 250, 300];
             const rows = [];
             for (let i = 0; i < values.length; i += 3) {
                 rows.push(values.slice(i, i + 3).map(ma => ({ text: `${ma}`, callback_data: `set_slow_ma|${symbol}|${ma}` })));
@@ -235,7 +235,7 @@ async function handleWebhook(req, res) {
                 return res.sendStatus(200);
             }
 
-            if (text.startsWith('ℹ Help')) {
+            if (text === '❓ Help' || text === 'ℹ Help' || text === '/help') {
                 const helpText = `🤖 MT5 Alert Control Panel
 
 Manage your MT5 alert system directly from Telegram.
@@ -305,15 +305,20 @@ Select an option below 👇`;
                 return res.sendStatus(200);
             }
 
-            if (action && action.startsWith('toggle_') || data.startsWith('toggle_')) {
+            if ((action && action.startsWith('toggle_')) || data.startsWith('toggle_')) {
                 let field = '';
                 let sym = symbol;
-                if (data.startsWith('toggle_')) {
-                    const partsUnderscore = data.split('_');
-                    field = partsUnderscore[1];
-                    sym = partsUnderscore.slice(2).join('_');
+
+                if (action && action.startsWith('toggle_')) {
+                    field = action.replace('toggle_', '');
                 } else {
-                    field = action.split('_')[1];
+                    // Backward compatibility if old callbacks ever use underscore format like toggle_cross_EURUSD
+                    const raw = data.replace('toggle_', '');
+                    const idx = raw.indexOf('_');
+                    if (idx > 0) {
+                        field = raw.slice(0, idx);
+                        sym = raw.slice(idx + 1);
+                    }
                 }
 
                 const sess = sessionService.getSession(chatId);
