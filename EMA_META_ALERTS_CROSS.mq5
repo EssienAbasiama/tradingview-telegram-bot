@@ -111,24 +111,6 @@ void RemoveSymbol(string sym)
    }
 }
 
-void ResetAllSymbols()
-{
-   // Clear memory
-   SymbolCount = 0;
-   ArrayResize(Symbols, 0);
-
-   // Clear file by opening in WRITE mode and closing immediately
-   int file = FileOpen(SYMBOLS_FILE, FILE_WRITE | FILE_TXT);
-   if (file >= 0)
-   {
-      FileClose(file);
-      Print("All symbols reset. symbols.txt cleared.");
-   }
-   else
-   {
-      Print("Failed to reset symbols file");
-   }
-}
 //=========================== PERSISTENCE ==========================//
 void SaveSymbols()
 {
@@ -384,6 +366,59 @@ int StringFindPos(const string text, const string substr, int startPos = 0)
    return -1;
 }
 
+int FindMatchingBrace(const string text, int openPos)
+{
+   if (openPos < 0 || openPos >= StringLen(text) || StringGetCharacter(text, openPos) != '{')
+      return -1;
+
+   int depth = 0;
+   bool inString = false;
+   bool escaped = false;
+
+   for (int i = openPos; i < StringLen(text); i++)
+   {
+      int c = StringGetCharacter(text, i);
+
+      if (inString)
+      {
+         if (escaped)
+         {
+            escaped = false;
+            continue;
+         }
+         if (c == '\\')
+         {
+            escaped = true;
+            continue;
+         }
+         if (c == '"')
+            inString = false;
+         continue;
+      }
+
+      if (c == '"')
+      {
+         inString = true;
+         continue;
+      }
+
+      if (c == '{')
+      {
+         depth++;
+         continue;
+      }
+
+      if (c == '}')
+      {
+         depth--;
+         if (depth == 0)
+            return i;
+      }
+   }
+
+   return -1;
+}
+
 string JsonGetValue(const string json, const string key, int startPos = 0)
 {
    string pattern = "\"" + key + "\":\"";
@@ -395,6 +430,96 @@ string JsonGetValue(const string json, const string key, int startPos = 0)
    if (q < 0)
       return "";
    return StringSubstr(json, p, q - p);
+}
+
+int JsonGetIntValue(const string json, const string key, int defaultValue = 0)
+{
+   string pattern = "\"" + key + "\":";
+   int p = StringFindPos(json, pattern, 0);
+   if (p < 0)
+      return defaultValue;
+
+   p += StringLen(pattern);
+   while (p < StringLen(json))
+   {
+      int c = StringGetCharacter(json, p);
+      if (c != ' ' && c != '\t' && c != '\r' && c != '\n')
+         break;
+      p++;
+   }
+
+   bool quoted = false;
+   if (p < StringLen(json) && StringGetCharacter(json, p) == '"')
+   {
+      quoted = true;
+      p++;
+   }
+
+   int q = p;
+   while (q < StringLen(json))
+   {
+      int c = StringGetCharacter(json, q);
+      if (quoted)
+      {
+         if (c == '"')
+            break;
+      }
+      else
+      {
+         if (c == ',' || c == '}' || c == ']')
+            break;
+      }
+      q++;
+   }
+
+   if (q <= p)
+      return defaultValue;
+
+   string raw = StringSubstr(json, p, q - p);
+   StringTrimLeft(raw);
+   StringTrimRight(raw);
+   if (StringLen(raw) == 0)
+      return defaultValue;
+
+   return (int)StringToInteger(raw);
+}
+
+bool TimeframeFromText(string tfText, ENUM_TIMEFRAMES &tf)
+{
+   StringToUpper(tfText);
+
+   if (tfText == "M1")
+      tf = PERIOD_M1;
+   else if (tfText == "M5")
+      tf = PERIOD_M5;
+   else if (tfText == "M15")
+      tf = PERIOD_M15;
+   else if (tfText == "M30")
+      tf = PERIOD_M30;
+   else if (tfText == "H1")
+      tf = PERIOD_H1;
+   else if (tfText == "H4")
+      tf = PERIOD_H4;
+   else if (tfText == "D1")
+      tf = PERIOD_D1;
+   else if (tfText == "PERIOD_M1")
+      tf = PERIOD_M1;
+   else if (tfText == "PERIOD_M5")
+      tf = PERIOD_M5;
+   else if (tfText == "PERIOD_M15")
+      tf = PERIOD_M15;
+   else if (tfText == "PERIOD_M30")
+      tf = PERIOD_M30;
+   else if (tfText == "PERIOD_H1")
+      tf = PERIOD_H1;
+   else if (tfText == "PERIOD_H4")
+      tf = PERIOD_H4;
+   else if (tfText == "PERIOD_D1")
+      tf = PERIOD_D1;
+   else
+      return false;
+
+   return true;
 }
 
 void SendStatusForCommand(string commandId, string type, string symbol, string resultText, string details)
@@ -435,7 +560,7 @@ void ParseAndExecuteCommands(string json)
       int objStart = StringFindPos(json, "{", i);
       if (objStart < 0)
          break;
-      int objEnd = StringFindPos(json, "}", objStart);
+      int objEnd = FindMatchingBrace(json, objStart);
       if (objEnd < 0)
          break;
 
@@ -486,11 +611,53 @@ void ParseAndExecuteCommands(string json)
          TestAlerts();
          SendStatusForCommand(id, type, symbol, "ok", "test alert dispatched");
       }
-      else if (type == "reset_pairs")
+      else if (type == "update_strategy")
       {
-         // Clear EA in-memory symbols and truncate symbols file
-         ResetAllSymbols();
-         SendStatusForCommand(id, type, "", "ok", "reset pairs");
+         bool found = false;
+
+         if (StringLen(symbol) > 0)
+            AddSymbol(symbol);
+
+         for (int idx = 0; idx < SymbolCount; idx++)
+         {
+            if (Symbols[idx].symbol != symbol)
+               continue;
+
+            found = true;
+
+            string crossTFText = JsonGetValue(obj, "crossTF");
+            string trendTF1Text = JsonGetValue(obj, "trendTF1");
+            string trendTF2Text = JsonGetValue(obj, "trendTF2");
+            int fast = JsonGetIntValue(obj, "fastMA", 0);
+            int slow = JsonGetIntValue(obj, "slowMA", 0);
+
+            ENUM_TIMEFRAMES tf;
+            if (StringLen(crossTFText) > 0 && TimeframeFromText(crossTFText, tf))
+               Symbols[idx].crossTF = tf;
+            if (StringLen(trendTF1Text) > 0 && TimeframeFromText(trendTF1Text, tf))
+               Symbols[idx].trendTF1 = tf;
+            if (StringLen(trendTF2Text) > 0 && TimeframeFromText(trendTF2Text, tf))
+               Symbols[idx].trendTF2 = tf;
+            if (fast > 0)
+               Symbols[idx].fastMA = fast;
+            if (slow > 0)
+               Symbols[idx].slowMA = slow;
+
+            PrintFormat("update_strategy applied: %s | crossTF=%s trendTF1=%s trendTF2=%s fastMA=%d slowMA=%d",
+                        Symbols[idx].symbol,
+                        EnumToString(Symbols[idx].crossTF),
+                        EnumToString(Symbols[idx].trendTF1),
+                        EnumToString(Symbols[idx].trendTF2),
+                        Symbols[idx].fastMA,
+                        Symbols[idx].slowMA);
+
+            break;
+         }
+
+         if (found)
+            SendStatusForCommand(id, type, symbol, "ok", "strategy updated");
+         else
+            SendStatusForCommand(id, type, symbol, "error", "symbol not found");
       }
       else if (StringFindPos(type, "toggle_") >= 0)
       {
