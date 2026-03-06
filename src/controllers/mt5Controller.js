@@ -11,6 +11,7 @@ const TOKEN = process.env.TELEGRAM_TOKEN;
 const MAIN_CHANNEL = process.env.CHANNEL_CHAT_ID;
 const TREND_CHANNEL = process.env.TREND_CHANNEL_CHAT_ID || process.env.TREND_CHANNEL_CHAT_ID || process.env.TREND_CHANNEL_CHAT_ID;
 const ADMIN_CHAT = process.env.CHAT_ID;
+const TREND_TOKEN = process.env.TREND_TELEGRAM_TOKEN || TOKEN;
 
 // Return pending commands for MT5 EA to consume
 function getCommands(req, res) {
@@ -180,14 +181,21 @@ async function postStatus(req, res) {
         // Route messages by type
         const text = `*MT5 Status*\nType: ${payload.type}\nSymbol: ${payload.symbol || '-'}\nResult: ${payload.result || '-'}\nDetails: ${payload.details || ''}`;
 
-        // TREND -> trend channel; CROSS/VOLUME -> main channel; else -> admin
+        // TREND -> trend channel (trend bot token), CROSS/VOLUME -> main channel; else -> admin
         try {
             const ptype = (payload.type || '').toUpperCase();
             console.log('Routing MT5 status, type=', ptype, 'MAIN_CHANNEL=', MAIN_CHANNEL, 'TREND_CHANNEL=', TREND_CHANNEL, 'ADMIN_CHAT=', ADMIN_CHAT);
             if (ptype.startsWith('TREND')) {
-                const target = process.env.TREND_CHANNEL_CHAT_ID || TREND_CHANNEL;
-                console.log('Sending TREND message to', target);
-                await telegramService.sendMessage(TOKEN, target, text, null, false, null);
+                const target = process.env.TREND_CHANNEL_CHAT_ID || TREND_CHANNEL || MAIN_CHANNEL;
+                const trendToken = process.env.TREND_TELEGRAM_TOKEN || TREND_TOKEN || TOKEN;
+                console.log('Sending TREND message to', target, 'using trend token');
+                try {
+                    await telegramService.sendMessage(trendToken, target, text, null, false, null);
+                } catch (trendErr) {
+                    // Fallback ensures TREND alerts are not lost when trend channel/token is misconfigured.
+                    console.error('Primary TREND send failed, falling back to main channel:', trendErr && trendErr.message ? trendErr.message : trendErr);
+                    await telegramService.sendMessage(TOKEN, MAIN_CHANNEL, text, null, false, null);
+                }
             } else if (ptype.includes('CROSS') || ptype.includes('VOLUME')) {
                 console.log('Sending CROSS/VOLUME message to', MAIN_CHANNEL);
                 await telegramService.sendMessage(TOKEN, MAIN_CHANNEL, text, null, false, null);

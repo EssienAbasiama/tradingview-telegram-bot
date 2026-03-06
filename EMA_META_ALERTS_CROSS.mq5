@@ -7,13 +7,51 @@
 #property version "5.0"
 
 //=========================== BACKEND ==============================//
-string BASE_URL = "https://35d2-102-88-111-120.ngrok-free.app/api/status";
-string COMMANDS_URL = "https://35d2-102-88-111-120.ngrok-free.app/api/commands";
+string BASE_URL = "https://tradingview-telegram-bot-3f68.onrender.com/api/status";
+string COMMANDS_URL = "https://tradingview-telegram-bot-3f68.onrender.com/api/commands";
 
 //=========================== GLOBAL CONTROL =======================//
 bool IsPaused = false;
 bool TestSent = false; // <-- Added (does not remove anything)
 string SYMBOLS_FILE = "symbols.txt";
+int CROSS_HISTORY_BARS = 800;
+
+bool EnsureSymbolReady(string sym)
+{
+   if (StringLen(sym) == 0)
+      return false;
+
+   if (!SymbolSelect(sym, true))
+   {
+      PrintFormat("Failed to select symbol: %s", sym);
+      return false;
+   }
+   return true;
+}
+
+long EnsureSymbolChart(string sym, ENUM_TIMEFRAMES tf)
+{
+   long chartId = ChartFirst();
+   while (chartId >= 0)
+   {
+      if (ChartSymbol(chartId) == sym)
+      {
+         ChartSetSymbolPeriod(chartId, sym, tf);
+         return chartId;
+      }
+      chartId = ChartNext(chartId);
+   }
+
+   long openedChart = ChartOpen(sym, tf);
+   if (openedChart <= 0)
+   {
+      PrintFormat("Failed to open chart for %s", sym);
+      return -1;
+   }
+
+   ChartSetSymbolPeriod(openedChart, sym, tf);
+   return openedChart;
+}
 
 //=========================== STRUCT ===============================//
 struct SymbolState
@@ -35,6 +73,28 @@ struct SymbolState
 
 SymbolState Symbols[];
 int SymbolCount = 0;
+
+void DrawXMarkOnChart(long chartId, string symbol, datetime t, double price);
+void DrawXMarkForSymbolCharts(string symbol, datetime t, double price);
+void RedrawHistoricalCrossesForSymbolCharts(SymbolState &s);
+
+void AttachCrossIndicatorsForSymbol(SymbolState &s)
+{
+   long chartId = EnsureSymbolChart(s.symbol, s.crossTF);
+   if (chartId < 0)
+      return;
+
+   int fastHandle = iMA(s.symbol, s.crossTF, s.fastMA, 0, MODE_EMA, PRICE_CLOSE);
+   int slowHandle = iMA(s.symbol, s.crossTF, s.slowMA, 0, MODE_SMA, PRICE_CLOSE);
+
+   if (fastHandle != INVALID_HANDLE)
+      ChartIndicatorAdd(chartId, 0, fastHandle);
+   if (slowHandle != INVALID_HANDLE)
+      ChartIndicatorAdd(chartId, 0, slowHandle);
+
+   // Show historical crosses immediately after attaching indicators.
+   RedrawHistoricalCrossesForSymbolCharts(s);
+}
 
 //=========================== INIT =================================//
 int OnInit()
@@ -70,6 +130,9 @@ void OnTick()
 //=========================== SYMBOL MANAGEMENT ====================//
 void AddSymbol(string sym)
 {
+   if (!EnsureSymbolReady(sym))
+      return;
+
    for (int i = 0; i < SymbolCount; i++)
       if (Symbols[i].symbol == sym)
          return;
@@ -92,6 +155,10 @@ void AddSymbol(string sym)
 
    SymbolCount++;
    SaveSymbols();
+
+   // Draw historical crosses for newly added symbols.
+   RedrawHistoricalCrossesForSymbolCharts(Symbols[SymbolCount - 1]);
+   AttachCrossIndicatorsForSymbol(Symbols[SymbolCount - 1]);
 }
 
 void RemoveSymbol(string sym)
@@ -145,6 +212,9 @@ void LoadSymbols()
 
 void AddSymbolInternal(string sym)
 {
+   if (!EnsureSymbolReady(sym))
+      return;
+
    for (int i = 0; i < SymbolCount; i++)
       if (Symbols[i].symbol == sym)
          return;
@@ -166,11 +236,18 @@ void AddSymbolInternal(string sym)
    Symbols[SymbolCount].lastTrendState = "";
 
    SymbolCount++;
+
+   // Draw historical crosses for symbols loaded from file.
+   RedrawHistoricalCrossesForSymbolCharts(Symbols[SymbolCount - 1]);
+   AttachCrossIndicatorsForSymbol(Symbols[SymbolCount - 1]);
 }
 
 //=========================== CORE PROCESS =========================//
 void ProcessSymbol(SymbolState &s)
 {
+   if (!EnsureSymbolReady(s.symbol))
+      return;
+
    if (s.enableCross)
       CheckCross(s);
    if (s.enableVolume)
@@ -196,10 +273,13 @@ void CheckCross(SymbolState &s)
       return;
    }
 
+   // Include zero-touch transitions so crosses are not missed when values become exactly equal.
    double d_now = fast[0] - slow[0];
    double d_prev = fast[1] - slow[1];
+   bool crossed = ((d_now > 0.0 && d_prev <= 0.0) ||
+                   (d_now < 0.0 && d_prev >= 0.0));
 
-   if (d_now * d_prev < 0.0)
+   if (crossed)
    {
       datetime t = iTime(s.symbol, s.crossTF, 0);
       if (t != s.lastCrossTime)
@@ -208,8 +288,8 @@ void CheckCross(SymbolState &s)
          string msg = "EMA/SMA Cross on " + s.symbol + "\nTF: " + EnumToString(s.crossTF) + "\nPrice: " + DoubleToString(price, _Digits);
          SendToBackend(s.symbol, "CROSS", EnumToString(s.crossTF), price, msg);
 
-         if (s.symbol == _Symbol)
-            DrawXMark(t, (fast[0] + slow[0]) / 2.0);
+         // Draw on every open chart that matches this symbol.
+         DrawXMarkForSymbolCharts(s.symbol, t, (fast[0] + slow[0]) / 2.0);
          s.lastCrossTime = t;
       }
    }
@@ -269,8 +349,20 @@ void CheckTrend(SymbolState &s)
 
 string TrendDir(string sym, ENUM_TIMEFRAMES tf, int fastMA, int slowMA)
 {
+   if (!EnsureSymbolReady(sym))
+      return "";
+
    int fast = iMA(sym, tf, fastMA, 0, MODE_EMA, PRICE_CLOSE);
    int slow = iMA(sym, tf, slowMA, 0, MODE_SMA, PRICE_CLOSE);
+
+   if (fast == INVALID_HANDLE || slow == INVALID_HANDLE)
+   {
+      if (fast != INVALID_HANDLE)
+         IndicatorRelease(fast);
+      if (slow != INVALID_HANDLE)
+         IndicatorRelease(slow);
+      return "";
+   }
 
    double f[1], sma[1];
    ArraySetAsSeries(f, true);
@@ -432,6 +524,21 @@ string JsonGetValue(const string json, const string key, int startPos = 0)
    return StringSubstr(json, p, q - p);
 }
 
+string JsonGetObject(const string json, const string key)
+{
+   string pattern = "\"" + key + "\":{";
+   int p = StringFindPos(json, pattern, 0);
+   if (p < 0)
+      return "";
+
+   int objStart = p + StringLen(pattern) - 1;
+   int objEnd = FindMatchingBrace(json, objStart);
+   if (objEnd < 0)
+      return "";
+
+   return StringSubstr(json, objStart, objEnd - objStart + 1);
+}
+
 int JsonGetIntValue(const string json, const string key, int defaultValue = 0)
 {
    string pattern = "\"" + key + "\":";
@@ -486,6 +593,8 @@ int JsonGetIntValue(const string json, const string key, int defaultValue = 0)
 
 bool TimeframeFromText(string tfText, ENUM_TIMEFRAMES &tf)
 {
+   StringTrimLeft(tfText);
+   StringTrimRight(tfText);
    StringToUpper(tfText);
 
    if (tfText == "M1")
@@ -515,6 +624,20 @@ bool TimeframeFromText(string tfText, ENUM_TIMEFRAMES &tf)
    else if (tfText == "PERIOD_H4")
       tf = PERIOD_H4;
    else if (tfText == "PERIOD_D1")
+      tf = PERIOD_D1;
+   else if (tfText == "1" || tfText == "1M" || tfText == "1MIN" || tfText == "MIN1")
+      tf = PERIOD_M1;
+   else if (tfText == "5" || tfText == "5M" || tfText == "5MIN" || tfText == "MIN5")
+      tf = PERIOD_M5;
+   else if (tfText == "15" || tfText == "15M" || tfText == "15MIN" || tfText == "MIN15")
+      tf = PERIOD_M15;
+   else if (tfText == "30" || tfText == "30M" || tfText == "30MIN" || tfText == "MIN30")
+      tf = PERIOD_M30;
+   else if (tfText == "60" || tfText == "1H" || tfText == "H60" || tfText == "HOUR1")
+      tf = PERIOD_H1;
+   else if (tfText == "240" || tfText == "4H" || tfText == "H4" || tfText == "HOUR4")
+      tf = PERIOD_H4;
+   else if (tfText == "1440" || tfText == "1D" || tfText == "D24" || tfText == "DAY1")
       tf = PERIOD_D1;
    else
       return false;
@@ -625,11 +748,51 @@ void ParseAndExecuteCommands(string json)
 
             found = true;
 
-            string crossTFText = JsonGetValue(obj, "crossTF");
-            string trendTF1Text = JsonGetValue(obj, "trendTF1");
-            string trendTF2Text = JsonGetValue(obj, "trendTF2");
-            int fast = JsonGetIntValue(obj, "fastMA", 0);
-            int slow = JsonGetIntValue(obj, "slowMA", 0);
+            // Telegram commands are typically nested as payload.settings.{...}
+            // Keep backward compatibility with flat keys.
+            string payloadObj = JsonGetObject(obj, "payload");
+            string settingsObj = "";
+            if (StringLen(payloadObj) > 0)
+               settingsObj = JsonGetObject(payloadObj, "settings");
+            if (StringLen(settingsObj) == 0)
+               settingsObj = JsonGetObject(obj, "settings");
+
+            string crossTFText = JsonGetValue(settingsObj, "crossTF");
+            if (StringLen(crossTFText) == 0)
+               crossTFText = JsonGetValue(obj, "crossTF");
+
+            string trendTF1Text = JsonGetValue(settingsObj, "trendTF1");
+            if (StringLen(trendTF1Text) == 0)
+               trendTF1Text = JsonGetValue(obj, "trendTF1");
+
+            string trendTF2Text = JsonGetValue(settingsObj, "trendTF2");
+            if (StringLen(trendTF2Text) == 0)
+               trendTF2Text = JsonGetValue(obj, "trendTF2");
+
+            string trendTFText = JsonGetValue(settingsObj, "trendTF");
+            if (StringLen(trendTFText) == 0)
+               trendTFText = JsonGetValue(obj, "trendTF");
+            if (StringLen(trendTFText) == 0)
+               trendTFText = JsonGetValue(settingsObj, "trendTimeframe");
+            if (StringLen(trendTFText) == 0)
+               trendTFText = JsonGetValue(obj, "trendTimeframe");
+            if (StringLen(trendTFText) == 0)
+               trendTFText = JsonGetValue(settingsObj, "trendlineTF");
+            if (StringLen(trendTFText) == 0)
+               trendTFText = JsonGetValue(obj, "trendlineTF");
+
+            if (StringLen(trendTF1Text) == 0)
+               trendTF1Text = trendTFText;
+            if (StringLen(trendTF2Text) == 0)
+               trendTF2Text = trendTFText;
+
+            int fast = JsonGetIntValue(settingsObj, "fastMA", 0);
+            if (fast <= 0)
+               fast = JsonGetIntValue(obj, "fastMA", 0);
+
+            int slow = JsonGetIntValue(settingsObj, "slowMA", 0);
+            if (slow <= 0)
+               slow = JsonGetIntValue(obj, "slowMA", 0);
 
             ENUM_TIMEFRAMES tf;
             if (StringLen(crossTFText) > 0 && TimeframeFromText(crossTFText, tf))
@@ -650,6 +813,9 @@ void ParseAndExecuteCommands(string json)
                         EnumToString(Symbols[idx].trendTF2),
                         Symbols[idx].fastMA,
                         Symbols[idx].slowMA);
+
+            // Rebuild historical cross marks when TF/MA settings change.
+            RedrawHistoricalCrossesForSymbolCharts(Symbols[idx]);
 
             break;
          }
@@ -769,4 +935,124 @@ string JsonEscape(string s)
    StringReplace(s, "\r", "\\r");
    StringReplace(s, "\t", "\\t");
    return s;
+}
+
+void DrawXMarkOnChart(long chartId, string symbol, datetime t, double price)
+{
+   string name = "X_" + symbol + "_" + (string)t;
+   if (ObjectFind(chartId, name) < 0)
+   {
+      ObjectCreate(chartId, name, OBJ_TEXT, 0, t, price);
+      ObjectSetString(chartId, name, OBJPROP_TEXT, "X");
+      ObjectSetInteger(chartId, name, OBJPROP_COLOR, clrRed);
+      ObjectSetInteger(chartId, name, OBJPROP_FONTSIZE, 14);
+      ObjectSetInteger(chartId, name, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   }
+}
+
+void DrawXMarkForSymbolCharts(string symbol, datetime t, double price)
+{
+   bool drawn = false;
+   long chartId = ChartFirst();
+   while (chartId >= 0)
+   {
+      if (ChartSymbol(chartId) == symbol)
+      {
+         DrawXMarkOnChart(chartId, symbol, t, price);
+         drawn = true;
+      }
+      chartId = ChartNext(chartId);
+   }
+
+   // Fallback to current chart if no chart is open for the symbol.
+   if (!drawn)
+   {
+      long chartId = EnsureSymbolChart(symbol, PERIOD_CURRENT);
+      if (chartId >= 0)
+         DrawXMarkOnChart(chartId, symbol, t, price);
+   }
+}
+
+void ClearXMarksOnChart(long chartId, string symbol)
+{
+   string prefix = "X_" + symbol + "_";
+   int total = ObjectsTotal(chartId, 0, -1);
+   for (int i = total - 1; i >= 0; i--)
+   {
+      string name = ObjectName(chartId, i, 0, -1);
+      if (StringFind(name, prefix) == 0)
+         ObjectDelete(chartId, name);
+   }
+}
+
+void DrawHistoricalCrossesOnChart(long chartId, SymbolState &s)
+{
+   int bars = CROSS_HISTORY_BARS;
+   if (bars < 50)
+      bars = 50;
+
+   int fastHandle = iMA(s.symbol, s.crossTF, s.fastMA, 0, MODE_EMA, PRICE_CLOSE);
+   int slowHandle = iMA(s.symbol, s.crossTF, s.slowMA, 0, MODE_SMA, PRICE_CLOSE);
+
+   if (fastHandle == INVALID_HANDLE || slowHandle == INVALID_HANDLE)
+   {
+      if (fastHandle != INVALID_HANDLE)
+         IndicatorRelease(fastHandle);
+      if (slowHandle != INVALID_HANDLE)
+         IndicatorRelease(slowHandle);
+      return;
+   }
+
+   double fast[];
+   double slow[];
+   datetime times[];
+   ArraySetAsSeries(fast, true);
+   ArraySetAsSeries(slow, true);
+   ArraySetAsSeries(times, true);
+
+   int need = bars + 2;
+   int copiedFast = CopyBuffer(fastHandle, 0, 0, need, fast);
+   int copiedSlow = CopyBuffer(slowHandle, 0, 0, need, slow);
+   int copiedTime = CopyTime(s.symbol, s.crossTF, 0, need, times);
+   int count = MathMin(copiedFast, MathMin(copiedSlow, copiedTime));
+
+   if (count > 2)
+   {
+      // Skip index 0 (forming candle) and draw confirmed historical crosses.
+      for (int i = count - 2; i >= 1; i--)
+      {
+         double dNow = fast[i] - slow[i];
+         double dPrev = fast[i + 1] - slow[i + 1];
+         bool crossed = ((dNow > 0.0 && dPrev <= 0.0) ||
+                         (dNow < 0.0 && dPrev >= 0.0));
+         if (crossed)
+            DrawXMarkOnChart(chartId, s.symbol, times[i], (fast[i] + slow[i]) / 2.0);
+      }
+   }
+
+   IndicatorRelease(fastHandle);
+   IndicatorRelease(slowHandle);
+}
+
+void RedrawHistoricalCrossesForSymbolCharts(SymbolState &s)
+{
+   bool matchedChart = false;
+   long chartId = ChartFirst();
+   while (chartId >= 0)
+   {
+      if (ChartSymbol(chartId) == s.symbol)
+      {
+         matchedChart = true;
+         ClearXMarksOnChart(chartId, s.symbol);
+         DrawHistoricalCrossesOnChart(chartId, s);
+      }
+      chartId = ChartNext(chartId);
+   }
+
+   // Fallback to current chart if it is the symbol chart.
+   if (!matchedChart && s.symbol == _Symbol)
+   {
+      ClearXMarksOnChart(0, s.symbol);
+      DrawHistoricalCrossesOnChart(0, s);
+   }
 }
